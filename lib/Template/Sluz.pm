@@ -135,7 +135,7 @@ sub array_dive {
     my $needle   = shift;
     my $haystack = shift;
 
-    return undef unless defined $needle && defined $haystack;
+    if (!defined $needle || !defined $haystack) { return undef }
 
     # Quick path: needle is a direct key in the hash
     return $haystack->{$needle} if exists $haystack->{$needle};
@@ -145,12 +145,12 @@ sub array_dive {
     my $arr   = $haystack;
 
     for my $elem (@parts) {
-        return undef unless defined $arr;
+        if (!defined $arr) { return undef }
         if (ref $arr eq 'ARRAY') {
-            return undef unless $elem =~ /^\d+$/ && $elem < @$arr;
+            if (!($elem =~ /^\d+$/ && $elem < @$arr)) { return undef }
             $arr = $arr->[$elem];
         } elsif (ref $arr eq 'HASH') {
-            return undef unless exists $arr->{$elem};
+            if (!exists $arr->{$elem}) { return undef }
             $arr = $arr->{$elem};
         } else {
             return undef;
@@ -404,7 +404,7 @@ sub _process_blocks {
 
     for my $x (@$blocks) {
         my $block = $x->[0];
-        next unless length $block;
+        if (!length $block) { next }
         if (substr($block, 0, 1) eq '{') {
             my $char_pos = $x->[1];
             $html .= $self->_process_block($block, $char_pos);
@@ -732,7 +732,7 @@ sub _micro_optimize {
     my $str  = shift // '';
     return $str if $str =~ /^-?\d+(?:\.\d+)?$/;
 
-    return undef unless length $str;
+    if (!length $str) { return undef }
     my $first = substr($str, 0, 1);
     my $last  = substr($str, -1);
 
@@ -873,7 +873,7 @@ sub _if_rules_from_tokens {
     for my $i (0 .. $num - 1) {
         if ($tmp[$i]) {
             my $test = $self->is_if_token($toks->[$i]);
-            push @conds, $test unless $i == $num - 1;
+            if ($i != $num - 1) { push @conds, $test }
         }
     }
 
@@ -882,7 +882,7 @@ sub _if_rules_from_tokens {
     my $first  = 1;
     for my $i (0 .. $num - 1) {
         if ($tmp[$i]) {
-            push @payloads, $str unless $first;
+            if (!$first) { push @payloads, $str }
             $first = 0;
             $str   = '';
         } else {
