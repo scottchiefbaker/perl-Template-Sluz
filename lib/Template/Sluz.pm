@@ -976,17 +976,13 @@ File: C<main.pl>
 File: C<template.stpl>
 
     Hello {$name}
-
     Nums: {foreach $array as $x}{$x} {/foreach}
-
     Info: {$hash.color} / {$hash.age}
 
 Output:
 
     Hello Scott
-
     Nums: one two three
-
     Info: red / 39
 
 =head1 METHODS
