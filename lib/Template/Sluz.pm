@@ -412,12 +412,24 @@ sub _get_blocks {
         push @blocks, [substr($str, $start), $i];
     }
 
+    # Strip leading newline from text blocks that follow {if} or
+    # {foreach} blocks, to avoid double-newlines when the block
+    # payload already ends with \n. For {foreach}, only strip when
+    # the payload actually ends with \n — if the payload is inline
+    # (no trailing \n), the newline is structural content, not
+    # whitespace noise.
     my $prev_is_if = 0;
     for my $i (0 .. $#blocks) {
         my $bstr     = $blocks[$i][0] // '';
-        my $cur_is_if = ($bstr =~ /^\{if/ || $bstr =~ /^\{for/);
+        my $cur_is_if = ($bstr =~ /^\{if\b/ || $bstr =~ /^\{for/);
         if ($prev_is_if) {
-            $blocks[$i][0] = $self->ltrim_one($bstr, "\n");
+            my $should_strip = 1;
+            if ($blocks[$i-1][0] =~ /^\{foreach .+?\}(.*)\{\/foreach\}$/s) {
+                $should_strip = (substr($1, -1) eq "\n") ? 1 : 0;
+            }
+            if ($should_strip) {
+                $blocks[$i][0] = $self->ltrim_one($bstr, "\n");
+            }
         }
         $prev_is_if = $cur_is_if;
     }
