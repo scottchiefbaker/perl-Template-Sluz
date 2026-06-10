@@ -26,14 +26,28 @@ use constant SLUZ_INLINE => 'INLINE_TEMPLATE';
 
 our $VERSION = '0.9.1';
 
-# Functions for template modifiers
+################################################################################
+# Built-in Sluz functions that can be used in templates
+################################################################################
+
 sub count {
     my $v = shift;
-    return scalar @$v if ref $v eq 'ARRAY';
-    return scalar keys %$v if ref $v eq 'HASH';
+
+	if (ref $v eq 'ARRAY') {
+		return scalar @$v;
+	}
+
+	if (ref $v eq 'HASH') {
+		return scalar(keys %$v);
+	}
+
     if (defined $v) { return 1 }
+
     return 0;
 }
+
+################################################################################
+################################################################################
 
 sub new {
     my $class = shift;
