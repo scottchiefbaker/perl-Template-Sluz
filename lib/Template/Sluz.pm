@@ -1051,6 +1051,10 @@ modifier:
 
 Scott Baker - https://www.perturb.org/
 
+=head1 SEE ALSO
+
+L<https://github.com/scottchiefbaker/sluz>
+
 =head1 LICENSE
 
 GPL-3.0-or-later
