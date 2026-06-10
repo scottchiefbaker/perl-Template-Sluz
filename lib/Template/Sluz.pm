@@ -919,8 +919,10 @@ Template::Sluz - A minimalistic Perl templating engine with Smarty-like syntax
     use Template::Sluz;
 
     my $s = Template::Sluz->new();
-    $s->assign('name'  => 'Scott');
-    $s->assign('items' => ['one', 'two', 'three']);
+
+    $s->assign('name', 'Scott');
+    $s->assign('array' => ['one', 'two', 'three']);
+    $s->assign('hash'  => { color => 'red', age => 39});
 
     print $s->fetch('tpls/page.stpl');
 
@@ -936,29 +938,23 @@ Create a new Template::Sluz instance.
 
 Assign template variables.
 
-    $s->assign('name' => 'value');
-    $s->assign({ key1 => 'val1', key2 => 'val2' });
+    $s->assign('name', 'Scott');
+    $s->assign('array' => ['one', 'two', 'three']);
+    $s->assign('hash'  => { color => 'red', age => 39});
+    $s->assign('nums'  => $array_ref);
+    $s->assign('data'  => $hash_ref);
 
 =item B<fetch>
 
 Process a template file and return the output.
 
     $s->fetch('tpls/page.stpl');
-    $s->fetch('tpls/child.stpl', 'tpls/parent.stpl');
-
-=item B<parse>, B<display>
-
-Aliases that call L</fetch>.
 
 =item B<parse_string>
 
 Process a template string directly without a file.
 
     $s->parse_string('Hello {$name}');
-
-=item B<parent_tpl>
-
-Set or get the parent template path.
 
 =back
 
@@ -1003,7 +999,7 @@ Set or get the parent template path.
 
 =head2 Literal blocks
 
-    {literal}{this is not parsed}{/literal}
+    {literal}function foo() { .. } {/literal}
 
 =head2 Comments
 
@@ -1020,7 +1016,7 @@ modifier:
 
 =head1 AUTHOR
 
-Scott Baker E<lt>scott@perturb.orgE<gt>
+Scott Baker - https://www.perturb.org/
 
 =head1 LICENSE
 

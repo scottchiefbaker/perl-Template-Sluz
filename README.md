@@ -8,8 +8,10 @@ Template::Sluz - A minimalistic Perl templating engine with Smarty-like syntax
 use Template::Sluz;
 
 my $s = Template::Sluz->new();
-$s->assign('name'  => 'Scott');
-$s->assign('items' => ['one', 'two', 'three']);
+
+$s->assign('name', 'Scott');
+$s->assign('array' => ['one', 'two', 'three']);
+$s->assign('hash'  => { color => 'red', age => 39});
 
 print $s->fetch('tpls/page.stpl');
 ```
@@ -25,8 +27,11 @@ print $s->fetch('tpls/page.stpl');
     Assign template variables.
 
     ```perl
-    $s->assign('name' => 'value');
-    $s->assign({ key1 => 'val1', key2 => 'val2' });
+    $s->assign('name', 'Scott');
+    $s->assign('array' => ['one', 'two', 'three']);
+    $s->assign('hash'  => { color => 'red', age => 39});
+    $s->assign('nums'  => $array_ref);
+    $s->assign('data'  => $hash_ref);
     ```
 
 - **fetch**
@@ -99,7 +104,7 @@ print $s->fetch('tpls/page.stpl');
 ### Literal Blocks
 
 ```
-{literal}{this is not parsed}{/literal}
+{literal}function foo() { .. } {/literal}
 ```
 
 ### Comments
@@ -121,7 +126,7 @@ modifier:
 
 ## Author
 
-Scott Baker <scott@perturb.org>
+Scott Baker - https://www.perturb.org/
 
 ## License
 
