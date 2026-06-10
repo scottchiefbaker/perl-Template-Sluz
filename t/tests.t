@@ -15,11 +15,11 @@ use Test::More;
 # -------------------------------------------------------------------
 BEGIN {
     no strict 'refs';
-    *{'Template::Sluz::truncate'}     = sub { substr($_[0], 0, $_[1]) };
-    *{'Template::Sluz::join_comma'}   = sub { my $s = $_[1] // ', '; join $s, @{$_[0]} };
-    *{'Template::Sluz::hello_world'}  = sub { "Hello world" };
-    *{'Template::Sluz::return_false'} = sub { 0 };
-    *{'Template::Sluz::return_null'}  = sub { undef };
+    *{'main::truncate'}     = sub { substr($_[0], 0, $_[1]) };
+    *{'main::join_comma'}   = sub { my $s = $_[1] // ', '; join $s, @{$_[0]} };
+    *{'main::hello_world'}  = sub { "Hello world" };
+    *{'main::return_false'} = sub { 0 };
+    *{'main::return_null'}  = sub { undef };
 }
 
 # -------------------------------------------------------------------
