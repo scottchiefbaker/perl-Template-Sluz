@@ -495,7 +495,9 @@ sub _variable_block {
         } else {
             my $pre = $self->array_dive($key, $self->{tpl_vars}) // '';
 
-            my $pipe_re = qr/\|(?![^"]*"(?:(?:[^"]*"){2})*[^"]*$)/;
+            # Split on | not inside double or single quotes (supports chained
+            # modifiers like {$x|uc|substr:0,3})
+            my $pipe_re = qr/\|(?![^"]*"(?:(?:[^"]*"){2})*[^"]*$)(?![^']*'(?:(?:[^']*'){2})*[^']*$)/;
             for my $m_part (split $pipe_re, $mod) {
                 my @x    = split /:/, $m_part, 2;
                 my $func = $x[0] // '';
@@ -503,7 +505,9 @@ sub _variable_block {
                 my @params = ($pre);
 
                 if (length $param_str) {
-                    my $comma_re = qr/,(?=(?:[^"]*"[^"]*")*[^"]*$)/;
+                    # Split on commas not inside double or single quotes
+                    # (parameter separator in modifier calls like substr:2,2)
+                    my $comma_re = qr/,(?=(?:[^"]*"[^"]*")*[^"]*$)(?=(?:[^']*'[^']*')*[^']*$)/;
                     my @new = map {
                         my ($v) = $self->_peval($_);
                         $v;
