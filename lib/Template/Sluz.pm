@@ -46,11 +46,12 @@ sub new {
         tpl_vars      => {},
         parent_tpl    => undef,
         var_prefix    => 'sluz_pfx',
-        php_file      => undef,
-        php_file_dir  => undef,
+        perl_file     => undef,
+        perl_file_dir => undef,
         fetch_called  => 0,
         char_pos      => -1,
     };
+
     bless $self, $class;
     return $self;
 }
@@ -75,13 +76,13 @@ sub fetch {
     my $tpl_file = shift || '';
     my $parent   = shift;
 
-    if (!$self->{php_file}) {
-        $self->{php_file}     = $self->_get_perl_file;
-        $self->{php_file_dir} = dirname($self->{php_file});
+    if (!$self->{perl_file}) {
+        $self->{perl_file}     = $self->_get_perl_file;
+        $self->{perl_file_dir} = dirname($self->{perl_file});
     }
 
     if (!$tpl_file) {
-        $tpl_file = $self->_guess_tpl_file($self->{php_file});
+        $tpl_file = $self->_guess_tpl_file($self->{perl_file});
     }
 
     my $parent_tpl;
@@ -227,20 +228,24 @@ sub is_if_token {
 
 sub _get_perl_file {
     my $self = shift;
-    my $i = 0;
+    my $i    = 0;
     my $file;
+
     while (caller($i)) {
         $file = (caller($i))[1];
         $i++;
     }
+
     return $file || __FILE__;
 }
 
 sub _guess_tpl_file {
     my $self  = shift;
     my $pfile = shift;
-    my $base  = basename($pfile);
-    $base =~ s/\.(?:pl|pm|php)$/.stpl/;
+
+    my $base = basename($pfile);
+    $base    =~ s/\.(pl|pm)$/.stpl/;
+
     return "tpls/$base";
 }
 
@@ -250,12 +255,12 @@ sub _get_tpl_content {
     $self->{tpl_file} = $tpl_file;
     my $tf = $tpl_file;
 
-    if ($self->{php_file_dir}) {
-        $tf = $self->{php_file_dir} . "/$tf";
+    if ($self->{perl_file_dir}) {
+        $tf = $self->{perl_file_dir} . "/$tf";
     }
 
     if ($tpl_file eq SLUZ_INLINE) {
-        my $c = $self->_get_inline_content($self->{php_file});
+        my $c = $self->_get_inline_content($self->{perl_file});
         if (defined $c) { return $c }
         return '';
     }
@@ -284,7 +289,7 @@ sub _get_inline_content {
     close $fh;
     my $idx = index($str, '__DATA__');
     return undef if $idx < 0;
-    return substr($str, $idx + 18);
+    return substr($str, $idx + 9);
 }
 
 # -------------------------------------------------------------------
@@ -627,8 +632,8 @@ sub _include_block {
     my $save    = $self->{tpl_vars};
     my $inc_tpl = $self->_extract_include_file($str);
 
-    if ($self->{php_file_dir}) {
-        $inc_tpl = $self->{php_file_dir} . "/$inc_tpl";
+    if ($self->{perl_file_dir}) {
+        $inc_tpl = $self->{perl_file_dir} . "/$inc_tpl";
     }
 
     while ($str =~ m/(\w+)=(['"](.+?)['"])/g) {
