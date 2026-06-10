@@ -7,24 +7,18 @@ make
 make test
 ```
 
-Or skip Makefile and run tests directly (faster):
-
-```sh
-perl -lrf
-```
-
 ## Key facts
-- Single-file CPAN-style Perl module: `lib/Template/Sluz.pm` (963 lines, zero deps)
+- Single-file CPAN-style Perl module: `lib/Template/Sluz.pm` (1029 lines, zero deps)
 - Smarty-like `{...}` template syntax; `{$var}`, `{if}`, `{foreach}`, `{include}`, modifiers via `|`, comments `{* *}`
 - Requires Perl 5.16+; no CPAN prereqs at runtime (only `Test::More` for testing)
 - Module version in `$VERSION` at `Sluz.pm:27`
 
 ## Testing quirks
-- Single test file `t/tests.t` (409 lines, uses `Test::More`)
-- Test helper functions injected into `Template::Sluz` namespace via `BEGIN` block (line 16-23)
+- Single test file `t/tests.t` (402 lines, uses `Test::More`)
+- Test helper functions injected into `main` namespace via `BEGIN` block (line 16-23)
 - Test sets `$sluz->{php_file_dir}` manually (line 52) — needed for template file resolution
 - Template files live in `t/tpls/` (test fixtures) and `tpls/` (examples)
-- Several tests wrapped in `local $TODO = "..."` blocks — features not yet implemented (PHP bracket syntax, chaining modifiers, negated hash lookup)
+- Several tests wrapped in `local $TODO = "..."` blocks — features not yet implemented (PHP bracket syntax, negated hash lookup, join_comma numeric param)
 - `sluz_test()` and `sluz_fetch_test()` are custom test helpers; check their definitions before adding new tests
 
 ## Architecture notes
@@ -32,7 +26,8 @@ perl -lrf
 - `parse_string(string)` — parse a template string directly
 - `parent_tpl(path)` — set parent template for inheritance
 - Template inheritance: pass `child_file, parent_file` to `fetch()`, or set `parent_tpl()` beforehand
-- Modifiers call any Perl built-in or function in the `Template::Sluz` namespace
+- Modifiers resolve functions in this priority: `main::` → `CORE::` → `Template::Sluz` (built-in module functions like `count`)
+- Expression blocks `{func()}` first try `Template::Sluz` then fall back to `main::` package
 - `$__FOREACH_FIRST`, `$__FOREACH_LAST`, `$__FOREACH_INDEX` available in foreach loops
 - `$__CHILD_TPL` variable available in parent templates for inheritance
 
