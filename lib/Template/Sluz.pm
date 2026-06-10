@@ -513,15 +513,17 @@ sub _variable_block {
 
                 {
                     no strict 'refs';
-                    my $callable = defined &{$func} || defined &{"CORE::$func"};
+                    my $callable = defined &{$func} || defined &{"CORE::$func"} || defined &{"main::$func"};
                     if (!$callable) {
                         my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
                         $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
                     }
                     if (defined &{$func}) {
                         $pre = eval { &{$func}(@params) };
-                    } else {
+                    } elsif (defined &{"CORE::$func"}) {
                         $pre = eval { &{"CORE::$func"}(@params) };
+                    } else {
+                        $pre = eval { &{"main::$func"}(@params) };
                     }
                 }
                 if ($@) {
