@@ -1,0 +1,1016 @@
+# Copyright (C) 2025  Scott Baker <scott@perturb.org>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+package Template::Sluz;
+
+use strict;
+use warnings;
+use 5.016;
+
+use File::Basename qw(dirname basename);
+use Carp qw(croak);
+
+use constant SLUZ_INLINE => 'INLINE_TEMPLATE';
+
+our $VERSION = '0.9.1';
+
+# Functions for template modifiers
+sub count {
+    my $v = shift;
+    return scalar @$v if ref $v eq 'ARRAY';
+    return scalar keys %$v if ref $v eq 'HASH';
+    if (defined $v) { return 1 }
+    return 0;
+}
+
+sub new {
+    my $class = shift;
+    my $self  = {
+        version       => $VERSION,
+        tpl_file      => undef,
+        inc_tpl_file  => undef,
+        debug         => 0,
+        in_unit_test  => 0,
+        tpl_vars      => {},
+        parent_tpl    => undef,
+        var_prefix    => 'sluz_pfx',
+        php_file      => undef,
+        php_file_dir  => undef,
+        fetch_called  => 0,
+        char_pos      => -1,
+    };
+    bless $self, $class;
+    return $self;
+}
+
+sub assign {
+    my $self = shift;
+    if (@_ == 1 && ref $_[0] eq 'HASH') {
+        my $h = shift;
+        @{$self->{tpl_vars}}{keys %$h} = values %$h;
+    } elsif (@_ % 2 == 0) {
+        my %h = @_;
+        @{$self->{tpl_vars}}{keys %h} = values %h;
+    }
+}
+
+sub fetch {
+    my $self     = shift;
+    my $tpl_file = shift || '';
+    my $parent   = shift;
+
+    if (!$self->{php_file}) {
+        $self->{php_file}     = $self->_get_perl_file;
+        $self->{php_file_dir} = dirname($self->{php_file});
+    }
+
+    if (!$tpl_file) {
+        $tpl_file = $self->_guess_tpl_file($self->{php_file});
+    }
+
+    my $parent_tpl;
+    if (defined $parent) {
+        $parent_tpl = $parent;
+    } else {
+        $parent_tpl = $self->{parent_tpl};
+    }
+    if ($parent_tpl) {
+        $self->assign('__CHILD_TPL', $tpl_file);
+        $tpl_file = $parent_tpl;
+    }
+
+    my $str    = $self->_get_tpl_content($tpl_file);
+    my @blocks = $self->_get_blocks($str);
+    my $html   = $self->_process_blocks(\@blocks);
+
+    $self->{fetch_called} = 1;
+    return $html;
+}
+
+sub parse {
+    my $self = shift;
+    return $self->fetch(@_);
+}
+
+sub display {
+    my $self = shift;
+    print $self->fetch(@_);
+}
+
+sub parse_string {
+    my $self    = shift;
+    my $tpl_str = shift // '';
+    my @blocks  = $self->_get_blocks($tpl_str);
+    return $self->_process_blocks(\@blocks);
+}
+
+sub parent_tpl {
+    my $self = shift;
+
+    if (@_) {
+        $self->{parent_tpl} = shift;
+    }
+
+    return $self->{parent_tpl};
+}
+
+sub array_dive {
+    my $self     = shift;
+    my $needle   = shift;
+    my $haystack = shift;
+
+    return undef unless defined $needle && defined $haystack;
+
+    return $haystack->{$needle} if exists $haystack->{$needle};
+
+    my @parts = split /\./, $needle;
+    my $arr   = $haystack;
+
+    for my $elem (@parts) {
+        return undef unless defined $arr;
+        if (ref $arr eq 'ARRAY') {
+            return undef unless $elem =~ /^\d+$/ && $elem < @$arr;
+            $arr = $arr->[$elem];
+        } elsif (ref $arr eq 'HASH') {
+            return undef unless exists $arr->{$elem};
+            $arr = $arr->{$elem};
+        } else {
+            return undef;
+        }
+    }
+    return $arr;
+}
+
+sub ltrim_one {
+    my $self = shift;
+    my $str  = shift // '';
+    my $char = shift;
+
+    if (length $str && substr($str, 0, 1) eq $char) {
+        return substr($str, 1);
+    }
+
+    return $str;
+}
+
+sub find_ending_tag {
+    my $self      = shift;
+    my $haystack  = shift // '';
+    my $open_tag  = shift;
+    my $close_tag = shift;
+
+    my $pos = index($haystack, $close_tag);
+    return undef if $pos < 0;
+
+    my $substr     = substr($haystack, 0, $pos);
+    my $open_count = () = $substr =~ /\Q$open_tag\E/g;
+    return $pos if $open_count == 1;
+
+    my $close_len = length $close_tag;
+    my $offset    = $pos + $close_len;
+
+    for (0 .. 4) {
+        $pos = index($haystack, $close_tag, $offset);
+        return undef if $pos < 0;
+
+        $substr         = substr($haystack, 0, $pos + 2);
+        $open_count     = () = $substr =~ /\Q$open_tag\E/g;
+        my $close_count = () = $substr =~ /\Q$close_tag\E/g;
+        return $pos if $open_count == $close_count;
+
+        $offset = $pos + $close_len;
+    }
+
+    return undef;
+}
+
+sub get_tokens {
+    my $self = shift;
+    my $str  = shift // '';
+    my @tokens = split /({[^}]+})/, $str;
+    @tokens = grep { defined && length } @tokens;
+    return @tokens;
+}
+
+sub is_if_token {
+    my $self = shift;
+    my $str  = shift // '';
+    return 1 if $str eq '{else}';
+    return 1 if $str eq '{/if}';
+    if ($str =~ /^\{(?:if|elseif)\s+(.+?)\}$/) {
+        return $1;
+    }
+    return '';
+}
+
+# -------------------------------------------------------------------
+# Private methods
+# -------------------------------------------------------------------
+
+sub _get_perl_file {
+    my $self = shift;
+    my $i = 0;
+    my $file;
+    while (caller($i)) {
+        $file = (caller($i))[1];
+        $i++;
+    }
+    return $file || __FILE__;
+}
+
+sub _guess_tpl_file {
+    my $self  = shift;
+    my $pfile = shift;
+    my $base  = basename($pfile);
+    $base =~ s/\.(?:pl|pm|php)$/.stpl/;
+    return "tpls/$base";
+}
+
+sub _get_tpl_content {
+    my $self     = shift;
+    my $tpl_file = shift // '';
+    $self->{tpl_file} = $tpl_file;
+    my $tf = $tpl_file;
+
+    if ($self->{php_file_dir}) {
+        $tf = $self->{php_file_dir} . "/$tf";
+    }
+
+    if ($tpl_file eq SLUZ_INLINE) {
+        my $c = $self->_get_inline_content($self->{php_file});
+        if (defined $c) { return $c }
+        return '';
+    }
+
+    if ($tf && !-r $tf) {
+        $self->_error_out("Unable to load template file <code>$tf</code>", 42280);
+    }
+
+    if ($tf) {
+        local $/;
+        open my $fh, '<', $tf or $self->_error_out("Cannot open <code>$tf</code>: $!", 42280);
+        my $str = <$fh>;
+        close $fh;
+        return $str // '';
+    }
+
+    return '';
+}
+
+sub _get_inline_content {
+    my $self = shift;
+    my $file = shift;
+    local $/;
+    open my $fh, '<', $file or return undef;
+    my $str = <$fh>;
+    close $fh;
+    my $idx = index($str, '__DATA__');
+    return undef if $idx < 0;
+    return substr($str, $idx + 18);
+}
+
+# -------------------------------------------------------------------
+# Tokenizer
+# -------------------------------------------------------------------
+
+sub _get_blocks {
+    my $self = shift;
+    my $str  = shift // '';
+    my $slen = length $str;
+    my $start = 0;
+    my $i;
+    my @blocks;
+
+    my $z = index($str, '{');
+    $z = $slen if $z < 0;
+
+    for ($i = $z; $i < $slen; $i++) {
+        my $char      = substr($str, $i, 1);
+        my $is_open   = $char eq '{';
+        my $is_closed = $char eq '}';
+
+        if (!$is_open && !$is_closed) {
+            my $next_open  = index($str, '{', $i);
+            $next_open = $slen if $next_open < 0;
+            my $next_close = index($str, '}', $i);
+            $next_close = $slen if $next_close < 0;
+            if ($next_open < $next_close) {
+                $i = $next_open - 1;
+            } else {
+                $i = $next_close - 1;
+            }
+            next;
+        }
+
+        my $has_len    = $start != $i;
+        my $is_comment = 0;
+
+        if ($is_open) {
+            my $prev_c;
+            if ($i > 0) {
+                $prev_c = substr($str, $i - 1, 1);
+            } else {
+                $prev_c = ' ';
+            }
+            my $next_c;
+            if ($i + 1 < $slen) {
+                $next_c = substr($str, $i + 1, 1);
+            } else {
+                $next_c = ' ';
+            }
+            my $chk = $prev_c . $char . $next_c;
+            $is_open = 0 if $chk =~ /\s[\{\}]\s/;
+            $is_comment = 1 if $next_c eq '*';
+        }
+
+        if ($is_open && $has_len) {
+            push @blocks, [substr($str, $start, $i - $start), $i];
+            $start = $i;
+        } elsif ($is_closed) {
+            my $len   = $i - $start + 1;
+            my $block = substr($str, $start, $len);
+
+            if ($block =~ /^\{(if|foreach|literal)\b/) {
+                my $open_tag  = $1;
+                my $close_tag = "{/$open_tag}";
+                for (my $j = $i + 1; $j < length $str; $j++) {
+                    if (substr($str, $j, 1) eq '}') {
+                        my $tmp = substr($str, $start, $j - $start + 1);
+                        my $oc  = () = $tmp =~ /\{\Q$open_tag\E/g;
+                        my $cc  = () = $tmp =~ m@\{\/\Q$open_tag\E\}@g;
+                        if ($oc == $cc) {
+                            $block = $tmp;
+                            last;
+                        }
+                    }
+                }
+            }
+
+            push @blocks, [$block, $i] if length $block;
+            $start += length($block);
+            $i = $start;
+        }
+
+        if ($is_comment) {
+            my $end = $self->find_ending_tag(substr($str, $start), '{*', '*}');
+            if (!defined $end) {
+                my ($line, $col, $file) = $self->_get_char_location($i, $self->{tpl_file});
+                $self->_error_out("Missing closing <code>*}</code> for comment in <code>$file</code> on line #$line", 48724);
+            }
+            $start += $end + 2;
+            $i = $start;
+        }
+    }
+
+    if ($start < $slen) {
+        push @blocks, [substr($str, $start), $i];
+    }
+
+    my $prev_is_if = 0;
+    for my $i (0 .. $#blocks) {
+        my $bstr     = $blocks[$i][0] // '';
+        my $cur_is_if = ($bstr =~ /^\{if/ || $bstr =~ /^\{for/);
+        if ($prev_is_if) {
+            $blocks[$i][0] = $self->ltrim_one($bstr, "\n");
+        }
+        $prev_is_if = $cur_is_if;
+    }
+
+    return @blocks;
+}
+
+sub _process_blocks {
+    my $self   = shift;
+    my $blocks = shift;
+    my $html   = '';
+
+    for my $x (@$blocks) {
+        my $block = $x->[0];
+        next unless length $block;
+        if (substr($block, 0, 1) eq '{') {
+            my $char_pos = $x->[1];
+            $html .= $self->_process_block($block, $char_pos);
+        } else {
+            $html .= $block;
+        }
+    }
+
+    return $html;
+}
+
+sub _process_block {
+    my $self     = shift;
+    my $str      = shift // '';
+    my $char_pos = shift // -1;
+
+    $self->{char_pos} = $char_pos;
+
+    # 1. Variable block {$foo} or {$foo|modifier}
+    if (substr($str, 0, 2) eq '{$' && $str =~ /^\{\$([\w|.'";\t :,!@#%^&*?_\-]+)\}$/) {
+        return $self->_variable_block($1);
+    }
+
+    # 2. If block {if ...}{/if}
+    if (substr($str, 0, 4) eq '{if ' && substr($str, -5) eq '{/if}') {
+        return $self->_if_block($str);
+    }
+
+    # 3. Foreach block {foreach ...}{/foreach}
+    if (substr($str, 0, 9) eq '{foreach ' && $str =~ /^\{foreach (\$\w[\w.]*) as \$(\w+)(?: => \$(\w+))?\}(.+)\{\/foreach\}$/s) {
+        return $self->_foreach_block($1, $2, $3, $4);
+    }
+
+    # 4. Include block {include ...}
+    if (substr($str, 0, 9) eq '{include ') {
+        return $self->_include_block($str);
+    }
+
+    # 5. Literal block {literal}...{/literal}
+    if (substr($str, 0, 9) eq '{literal}' && $str =~ /^\{literal\}(.+)\{\/literal\}$/s) {
+        return $1;
+    }
+
+    # 6. Expression / function block
+    if ($str =~ /^\{(.+)}$/s) {
+        return $self->_expression_block($str, $1);
+    }
+
+    # 7. Unclosed tag
+    if (substr($str, -1) ne '}') {
+        my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+        $self->_error_out("Unclosed tag <code>$str</code> in <code>$file</code> on line #$line", 45821);
+    }
+
+    # 8. Fallthrough
+    return $str;
+}
+
+# -------------------------------------------------------------------
+# Block handlers
+# -------------------------------------------------------------------
+
+sub _variable_block {
+    my $self = shift;
+    my $str  = shift;
+
+    if ($str =~ /(.+?)\|(.*)/) {
+        my $key = $1;
+        my $mod = $2;
+
+        my $tmp        = $self->array_dive($key, $self->{tpl_vars});
+        my $is_nothing = (!defined $tmp || (defined $tmp && ref $tmp eq '' && !length $tmp && $tmp ne '0'));
+        my $is_default = index($mod, 'default:') >= 0;
+
+        if ($is_nothing && $is_default) {
+            my $dval = $mod;
+            $dval =~ s/^.*?default://;
+            my ($ret) = $self->_peval($dval);
+            if (defined $ret) { return $ret }
+            return '';
+        } elsif (!$is_nothing && $is_default) {
+            return $self->array_dive($key, $self->{tpl_vars}) // '';
+        } else {
+            my $pre = $self->array_dive($key, $self->{tpl_vars}) // '';
+
+            my $pipe_re = qr/\|(?![^"]*"(?:(?:[^"]*"){2})*[^"]*$)/;
+            for my $m_part (split $pipe_re, $mod) {
+                my @x    = split /:/, $m_part, 2;
+                my $func = $x[0] // '';
+                my $param_str = $x[1] // '';
+                my @params = ($pre);
+
+                if (length $param_str) {
+                    my $comma_re = qr/,(?=(?:[^"]*"[^"]*")*[^"]*$)/;
+                    my @new = map {
+                        my ($v) = $self->_peval($_);
+                        $v;
+                    } split $comma_re, $param_str;
+                    push @params, @new;
+                }
+
+                {
+                    no strict 'refs';
+                    my $callable = defined &{$func} || defined &{"CORE::$func"};
+                    if (!$callable) {
+                        my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+                        $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
+                    }
+                    if (defined &{$func}) {
+                        $pre = eval { &{$func}(@params) };
+                    } else {
+                        $pre = eval { &{"CORE::$func"}(@params) };
+                    }
+                }
+                if ($@) {
+                    $self->_error_out("Exception: $@", 79134);
+                }
+            }
+
+            return $pre;
+        }
+    }
+
+    my $ret = $self->array_dive($str, $self->{tpl_vars});
+    if (ref $ret eq 'ARRAY') { return 'ARRAY' }
+    if (ref $ret eq 'HASH')  { return 'HASH' }
+    if (defined $ret) { return $ret }
+    return '';
+}
+
+sub _if_block {
+    my $self = shift;
+    my $str  = shift;
+
+    my $is_simple = index($str, '{else', 7) < 0;
+    my @rules;
+
+    if ($is_simple) {
+        $str =~ /\{if (.+?)}(.+)\{\/if\}/s;
+        my $cond    = $1 // '';
+        my $payload = $2 // '';
+        $payload = $self->ltrim_one($payload, "\n");
+        @rules = ([$cond, $payload]);
+    } else {
+        my @toks = $self->get_tokens($str);
+        @rules   = $self->_if_rules_from_tokens(\@toks);
+    }
+
+    my $ret = '';
+    for my $rule (@rules) {
+        my $test    = $self->_convert_vars($rule->[0]);
+        my $payload = $rule->[1];
+        my ($res) = $self->_peval($test);
+        if ($res) {
+            my @in_blocks = $self->_get_blocks($payload);
+            $ret .= $self->_process_blocks(\@in_blocks);
+            last;
+        }
+    }
+
+    return $ret;
+}
+
+sub _foreach_block {
+    my $self     = shift;
+    my $src_expr = shift;
+    my $okey     = shift;
+    my $oval     = shift;
+    my $payload  = shift;
+
+    my $conv_src = $self->_convert_vars($src_expr);
+    $payload = $self->ltrim_one($payload, "\n");
+    my @blocks = $self->_get_blocks($payload);
+
+    my ($src) = $self->_peval($conv_src);
+
+    if (!defined $src) {
+        $src = [];
+    } elsif (ref $src ne 'ARRAY' && ref $src ne 'HASH') {
+        $src = [$src];
+    }
+
+    my %save = %{$self->{tpl_vars}};
+    my $ret  = '';
+    my $idx  = 0;
+
+    if (ref $src eq 'ARRAY') {
+        my $last = $#$src;
+        for my $i (0 .. $last) {
+            if ($idx == 0) {
+                $self->{tpl_vars}{__FOREACH_FIRST} = 1;
+            } else {
+                $self->{tpl_vars}{__FOREACH_FIRST} = 0;
+            }
+            if ($idx == $last) {
+                $self->{tpl_vars}{__FOREACH_LAST} = 1;
+            } else {
+                $self->{tpl_vars}{__FOREACH_LAST} = 0;
+            }
+            $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
+            if (defined $oval) {
+                $self->{tpl_vars}{$okey} = $i;
+                $self->{tpl_vars}{$oval} = $src->[$i];
+            } else {
+                $self->{tpl_vars}{$okey} = $src->[$i];
+            }
+            $ret .= $self->_process_blocks(\@blocks);
+            $idx++;
+        }
+    }
+
+    $self->{tpl_vars} = \%save;
+    return $ret;
+}
+
+sub _include_block {
+    my $self = shift;
+    my $str  = shift;
+
+    my $save    = $self->{tpl_vars};
+    my $inc_tpl = $self->_extract_include_file($str);
+
+    if ($self->{php_file_dir}) {
+        $inc_tpl = $self->{php_file_dir} . "/$inc_tpl";
+    }
+
+    while ($str =~ m/(\w+)=(['"](.+?)['"])/g) {
+        my $key = $1;
+        my $val = $2;
+        next if $key eq 'file';
+        $val = $self->_convert_vars($val);
+        my ($res) = $self->_peval($val);
+        if (defined $res) {
+            $self->assign($key => $res);
+        } else {
+            $self->assign($key => $val);
+        }
+    }
+
+    if (!-f $inc_tpl || !-r $inc_tpl) {
+        $self->{inc_tpl_file} = undef;
+        my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+        $self->_error_out("Unable to load include template <code>$inc_tpl</code> in <code>$file</code> on line #$line", 18485);
+    }
+
+    local $/;
+    open my $fh, '<', $inc_tpl or $self->_error_out("Cannot open <code>$inc_tpl</code>: $!", 18485);
+    my $content = <$fh>;
+    close $fh;
+
+    my @blocks = $self->_get_blocks($content);
+    my $r      = $self->_process_blocks(\@blocks);
+
+    $self->{tpl_vars}      = $save;
+    $self->{inc_tpl_file}  = undef;
+
+    return $r;
+}
+
+sub _expression_block {
+    my $self  = shift;
+    my $str   = shift;
+    my $inner = shift;
+
+    if ($str !~ /["\d\$\(]/) {
+        my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+        $self->_error_out("Unknown block type <code>$str</code> in <code>$file</code> on line #$line", 73467);
+    }
+
+    my $after = $self->_convert_vars($inner);
+    my ($ret, $err) = $self->_peval($after);
+
+    my $valid;
+    if (defined $ret && (!ref $ret || ref $ret eq '')) {
+        $valid = 1;
+    } else {
+        $valid = 0;
+    }
+
+    if ($err || !$valid) {
+        my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+        $self->_error_out("Unknown tag <code>$str</code> in <code>$file</code> on line #$line", 18933);
+    }
+
+    return $ret;
+}
+
+# -------------------------------------------------------------------
+# Variable / eval engine
+# -------------------------------------------------------------------
+
+sub _convert_vars {
+    my $self = shift;
+    my $str  = shift // '';
+    return $str if index($str, '$') < 0;
+
+    # Step 1: $var.key -> $__S->{sluz_pfx_var}->{key}
+    $str =~ s/(\$\w[\w\.]*)/ $self->_dot_to_bracket_cb($1) /ge;
+
+    # Step 2: $__S->{...}["key"] -> $__S->{...}->{key} (PHP bracket syntax)
+    $str =~ s/(\$__S(?:->\{[^}]+\})+)\[(["'])([^\]]+?)\2\]/$1 . '->{' . $3 . '}'/ge;
+
+    return $str;
+}
+
+sub _dot_to_bracket_cb {
+    my $self  = shift;
+    my $match = shift;
+    my @parts = split /\./, $match;
+    my $first = shift @parts;
+    my $var   = substr($first, 1);
+    my $res   = "\$__S->\{$self->{var_prefix}_$var\}";
+    for my $p (@parts) {
+        if ($p =~ /^\d+$/) {
+            $res .= "->[$p]";
+        } else {
+            $res .= "->{$p}";
+        }
+    }
+    return $res;
+}
+
+sub _micro_optimize {
+    my $self = shift;
+    my $str  = shift // '';
+    return $str if $str =~ /^-?\d+(?:\.\d+)?$/;
+
+    return undef unless length $str;
+    my $first = substr($str, 0, 1);
+    my $last  = substr($str, -1);
+
+    if ($first eq "'" && $last eq "'") {
+        my $tmp = substr($str, 1, length($str) - 2);
+        return $tmp if index($tmp, "'") < 0;
+    }
+
+    if ($first eq '"' && $last eq '"') {
+        my $tmp = substr($str, 1, length($str) - 2);
+        return $tmp if index($tmp, '$') < 0 && index($tmp, '"') < 0;
+    }
+
+    if ($str =~ /^\$__S->\{sluz_pfx_(\w+)\}$/) {
+        return $self->{tpl_vars}{$1} if exists $self->{tpl_vars}{$1};
+    }
+
+    if ($str =~ /^!\$__S->\{sluz_pfx_(\w+)\}$/) {
+        return !$self->{tpl_vars}{$1} if exists $self->{tpl_vars}{$1};
+    }
+
+    if ($str =~ /^(\w+)$/ && exists $self->{tpl_vars}{$1}) {
+        return $self->{tpl_vars}{$1};
+    }
+
+    if ($str =~ /^!(\w+)$/ && exists $self->{tpl_vars}{$1}) {
+        return !$self->{tpl_vars}{$1};
+    }
+
+    return undef;
+}
+
+sub _peval {
+    my $self = shift;
+    my $str  = shift // '';
+
+    $str =~ s/===/==/g;
+
+    my $opt = $self->_micro_optimize($str);
+    return ($opt, 0) if defined $opt;
+
+    my $__S = {};
+    while (my ($k, $v) = each %{$self->{tpl_vars}}) {
+        $__S->{"$self->{var_prefix}_$k"} = $v;
+    }
+
+    my $ret;
+    {
+        local $SIG{__WARN__} = sub {};
+        $ret = eval "return ($str);";
+    }
+
+    if ($@) {
+        return (undef, -1);
+    }
+
+    return ($ret, 0);
+}
+
+# -------------------------------------------------------------------
+# Error handling
+# -------------------------------------------------------------------
+
+sub _error_out {
+    my $self    = shift;
+    my $msg     = shift;
+    my $err_num = shift;
+    croak "Template::Sluz error #$err_num: $msg";
+}
+
+sub _get_char_location {
+    my $self     = shift;
+    my $pos      = shift;
+    my $tpl_file = shift // '';
+
+    $tpl_file = $self->{inc_tpl_file} if $self->{inc_tpl_file};
+
+    my $str = $self->_get_tpl_content($tpl_file);
+    return (-1, -1, $tpl_file) if $pos < 0 || !defined $str;
+
+    my $line = 1;
+    my $col  = 0;
+    for (my $i = 0; $i < length $str; $i++) {
+        $col++;
+        $line++, $col = 0 if substr($str, $i, 1) eq "\n";
+        return ($line, $col, $tpl_file) if $pos == $i;
+    }
+
+    return ($line, $col, $tpl_file) if $pos == length $str;
+    return (-1, -1, $tpl_file);
+}
+
+sub _extract_include_file {
+    my $self = shift;
+    my $str  = shift;
+
+    if ($str =~ /\s(file=)(['"].+?['"])/) {
+        my $xstr = $self->_convert_vars($2);
+        my ($ret) = $self->_peval($xstr);
+        $self->{inc_tpl_file} = $ret;
+        return $ret;
+    }
+
+    if ($str =~ /\s(['"].+?['"])/) {
+        my $xstr = $self->_convert_vars($1);
+        my ($ret) = $self->_peval($xstr);
+        $self->{inc_tpl_file} = $ret;
+        return $ret;
+    }
+
+    my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+    $self->_error_out("Unable to find a file in include block <code>$str</code> in <code>$file</code> on line #$line", 68493);
+}
+
+sub _if_rules_from_tokens {
+    my $self = shift;
+    my $toks = shift;
+    my $num  = scalar @$toks;
+    my $nested = 0;
+    my @tmp;
+
+    for my $i (0 .. $num - 1) {
+        my $item = $toks->[$i];
+        $nested++ if $item =~ /^\{if/;
+        $nested-- if $item eq '{/if}';
+
+        my $yes = 0;
+        if ($nested == 1) {
+            $yes = $self->is_if_token($item) || 0;
+            $yes = 0 if $item eq '{/if}';
+        }
+        $tmp[$i] = $yes;
+    }
+
+    $tmp[$num - 1] = 1;
+
+    my @conds;
+    for my $i (0 .. $num - 1) {
+        if ($tmp[$i]) {
+            my $test = $self->is_if_token($toks->[$i]);
+            push @conds, $test unless $i == $num - 1;
+        }
+    }
+
+    my $str    = '';
+    my @payloads;
+    my $first  = 1;
+    for my $i (0 .. $num - 1) {
+        if ($tmp[$i]) {
+            push @payloads, $str unless $first;
+            $first = 0;
+            $str   = '';
+        } else {
+            $str .= $toks->[$i];
+        }
+    }
+
+    if (@conds != @payloads) {
+        $self->_error_out("Error parsing {if} conditions in '$str'", 95320);
+    }
+
+    my @ret;
+    push @ret, [$conds[$_], $payloads[$_]] for 0 .. $#conds;
+    return @ret;
+}
+
+1;
+
+__END__
+
+=head1 NAME
+
+Template::Sluz - A minimalistic Perl templating engine with Smarty-like syntax
+
+=head1 SYNOPSIS
+
+    use Template::Sluz;
+
+    my $s = Template::Sluz->new();
+    $s->assign('name'  => 'Scott');
+    $s->assign('items' => ['one', 'two', 'three']);
+
+    print $s->fetch('tpls/page.stpl');
+
+=head1 METHODS
+
+=over 4
+
+=item B<new>
+
+Create a new Template::Sluz instance.
+
+=item B<assign>
+
+Assign template variables.
+
+    $s->assign('name' => 'value');
+    $s->assign({ key1 => 'val1', key2 => 'val2' });
+
+=item B<fetch>
+
+Process a template file and return the output.
+
+    $s->fetch('tpls/page.stpl');
+    $s->fetch('tpls/child.stpl', 'tpls/parent.stpl');
+
+=item B<parse>, B<display>
+
+Aliases that call L</fetch>.
+
+=item B<parse_string>
+
+Process a template string directly without a file.
+
+    $s->parse_string('Hello {$name}');
+
+=item B<parent_tpl>
+
+Set or get the parent template path.
+
+=back
+
+=head1 TEMPLATE SYNTAX
+
+=head2 Variables
+
+    {$name}
+    {$user.first_name}
+    {$items.0}
+
+=head2 Modifiers
+
+    {$name|uc}
+    {$name|substr:0,3}
+    {$name|lc|ucfirst}
+
+=head2 Default values
+
+    {$name|default:'Unknown'}
+
+=head2 Conditionals
+
+    {if $age > 18}
+        Adult
+    {elseif $age > 12}
+        Teen
+    {else}
+        Child
+    {/if}
+
+=head2 Loops
+
+    {foreach $items as $item}
+        {$item}
+    {/foreach}
+
+=head2 Includes
+
+    {include file='header.stpl'}
+    {include file='header.stpl' title='Home'}
+
+=head2 Literal blocks
+
+    {literal}{this is not parsed}{/literal}
+
+=head2 Comments
+
+    {* This is a comment *}
+
+=head1 FUNCTIONS AS MODIFIERS
+
+Any Perl built-in or user-defined function can be used as a template
+modifier:
+
+    {$name|ucfirst}
+    {$items|join:' - '}
+    {$text|substr:0,10}
+
+=head1 AUTHOR
+
+Scott Baker E<lt>scott@perturb.orgE<gt>
+
+=head1 LICENSE
+
+GPL-3.0-or-later
+
+=cut

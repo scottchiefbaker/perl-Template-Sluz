@@ -1,0 +1,14 @@
+AGENTS.md
+Changes
+lib/Template/Sluz.pm
+LICENSE
+Makefile.PL
+MANIFEST
+README.md
+t/tests.t
+t/tpls/child.stpl
+t/tpls/extra.stpl
+t/tpls/parent.stpl
+tpls/child.stpl
+tpls/extra.stpl
+tpls/parent.stpl
