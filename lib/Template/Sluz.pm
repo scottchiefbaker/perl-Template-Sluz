@@ -157,7 +157,9 @@ sub array_dive {
     if (!defined $needle || !defined $haystack) { return undef }
 
     # Quick path: needle is a direct key in the hash
-    return $haystack->{$needle} if exists $haystack->{$needle};
+    if (exists $haystack->{$needle}) {
+        return $haystack->{$needle};
+    }
 
     # Walk dotted path (e.g. "user.address.city") through nested structures
     my @parts = split /\./, $needle;
@@ -198,11 +200,11 @@ sub find_ending_tag {
 
     # Find the first close tag; if there's only one open tag before it, we're done
     my $pos = index($haystack, $close_tag);
-    return undef if $pos < 0;
+    if ($pos < 0) { return undef }
 
     my $substr     = substr($haystack, 0, $pos);
     my $open_count = () = $substr =~ /\Q$open_tag\E/g;
-    return $pos if $open_count == 1;
+    if ($open_count == 1) { return $pos }
 
     # Nested tags: scan forward through subsequent close tags until
     # open/close counts balance (max 5 nesting levels)
@@ -211,12 +213,12 @@ sub find_ending_tag {
 
     for (0 .. 4) {
         $pos = index($haystack, $close_tag, $offset);
-        return undef if $pos < 0;
+        if ($pos < 0) { return undef }
 
         $substr         = substr($haystack, 0, $pos + 2);
         $open_count     = () = $substr =~ /\Q$open_tag\E/g;
         my $close_count = () = $substr =~ /\Q$close_tag\E/g;
-        return $pos if $open_count == $close_count;
+        if ($open_count == $close_count) { return $pos }
 
         $offset = $pos + $close_len;
     }
@@ -235,8 +237,8 @@ sub get_tokens {
 sub is_if_token {
     my $self = shift;
     my $str  = shift // '';
-    return 1 if $str eq '{else}';
-    return 1 if $str eq '{/if}';
+    if ($str eq '{else}') { return 1 }
+    if ($str eq '{/if}') { return 1 }
     if ($str =~ /^\{(?:if|elseif)\s+(.+?)\}$/) {
         return $1;
     }
@@ -309,7 +311,7 @@ sub _get_inline_content {
     my $str = <$fh>;
     close $fh;
     my $idx = index($str, '__DATA__');
-    return undef if $idx < 0;
+    if ($idx < 0) { return undef }
     return substr($str, $idx + 9);
 }
 
@@ -326,7 +328,7 @@ sub _get_blocks {
     my @blocks;
 
     my $z = index($str, '{');
-    $z = $slen if $z < 0;
+    if ($z < 0) { $z = $slen }
 
     for ($i = $z; $i < $slen; $i++) {
         my $char      = substr($str, $i, 1);
@@ -335,9 +337,9 @@ sub _get_blocks {
 
         if (!$is_open && !$is_closed) {
             my $next_open  = index($str, '{', $i);
-            $next_open = $slen if $next_open < 0;
+            if ($next_open < 0) { $next_open = $slen }
             my $next_close = index($str, '}', $i);
-            $next_close = $slen if $next_close < 0;
+            if ($next_close < 0) { $next_close = $slen }
             if ($next_open < $next_close) {
                 $i = $next_open - 1;
             } else {
@@ -363,8 +365,8 @@ sub _get_blocks {
                 $next_c = ' ';
             }
             my $chk = $prev_c . $char . $next_c;
-            $is_open = 0 if $chk =~ /\s[\{\}]\s/;
-            $is_comment = 1 if $next_c eq '*';
+            if ($chk =~ /\s[\{\}]\s/) { $is_open = 0 }
+            if ($next_c eq '*') { $is_comment = 1 }
         }
 
         if ($is_open && $has_len) {
@@ -390,7 +392,7 @@ sub _get_blocks {
                 }
             }
 
-            push @blocks, [$block, $i] if length $block;
+            if (length $block) { push @blocks, [$block, $i] }
             $start += length($block);
             $i = $start;
         }
@@ -666,7 +668,7 @@ sub _include_block {
     while ($str =~ m/(\w+)=(['"](.+?)['"])/g) {
         my $key = $1;
         my $val = $2;
-        next if $key eq 'file';
+        if ($key eq 'file') { next }
         $val = $self->_convert_vars($val);
         my ($res) = $self->_peval($val);
         if (defined $res) {
@@ -731,7 +733,7 @@ sub _expression_block {
 sub _convert_vars {
     my $self = shift;
     my $str  = shift // '';
-    return $str if index($str, '$') < 0;
+    if (index($str, '$') < 0) { return $str }
 
     # Step 1: $var.key -> $__S->{sluz_pfx_var}->{key}
     $str =~ s/(\$\w[\w\.]*)/ $self->_dot_to_bracket_cb($1) /ge;
@@ -762,7 +764,7 @@ sub _dot_to_bracket_cb {
 sub _micro_optimize {
     my $self = shift;
     my $str  = shift // '';
-    return $str if $str =~ /^-?\d+(?:\.\d+)?$/;
+    if ($str =~ /^-?\d+(?:\.\d+)?$/) { return $str }
 
     if (!length $str) { return undef }
     my $first = substr($str, 0, 1);
@@ -770,20 +772,20 @@ sub _micro_optimize {
 
     if ($first eq "'" && $last eq "'") {
         my $tmp = substr($str, 1, length($str) - 2);
-        return $tmp if index($tmp, "'") < 0;
+        if (index($tmp, "'") < 0) { return $tmp }
     }
 
     if ($first eq '"' && $last eq '"') {
         my $tmp = substr($str, 1, length($str) - 2);
-        return $tmp if index($tmp, '$') < 0 && index($tmp, '"') < 0;
+        if (index($tmp, '$') < 0 && index($tmp, '"') < 0) { return $tmp }
     }
 
     if ($str =~ /^\$__S->\{sluz_pfx_(\w+)\}$/) {
-        return $self->{tpl_vars}{$1} if exists $self->{tpl_vars}{$1};
+        if (exists $self->{tpl_vars}{$1}) { return $self->{tpl_vars}{$1} }
     }
 
     if ($str =~ /^!\$__S->\{sluz_pfx_(\w+)\}$/) {
-        return !$self->{tpl_vars}{$1} if exists $self->{tpl_vars}{$1};
+        if (exists $self->{tpl_vars}{$1}) { return !$self->{tpl_vars}{$1} }
     }
 
     if ($str =~ /^(\w+)$/ && exists $self->{tpl_vars}{$1}) {
@@ -804,7 +806,7 @@ sub _peval {
     $str =~ s/===/==/g;
 
     my $opt = $self->_micro_optimize($str);
-    return ($opt, 0) if defined $opt;
+    if (defined $opt) { return ($opt, 0) }
 
     my $__S = {};
     while (my ($k, $v) = each %{$self->{tpl_vars}}) {
@@ -843,20 +845,23 @@ sub _get_char_location {
     my $pos      = shift;
     my $tpl_file = shift // '';
 
-    $tpl_file = $self->{inc_tpl_file} if $self->{inc_tpl_file};
+    if ($self->{inc_tpl_file}) { $tpl_file = $self->{inc_tpl_file} }
 
     my $str = $self->_get_tpl_content($tpl_file);
-    return (-1, -1, $tpl_file) if $pos < 0 || !defined $str;
+    if ($pos < 0 || !defined $str) { return (-1, -1, $tpl_file) }
 
     my $line = 1;
     my $col  = 0;
     for (my $i = 0; $i < length $str; $i++) {
         $col++;
-        $line++, $col = 0 if substr($str, $i, 1) eq "\n";
-        return ($line, $col, $tpl_file) if $pos == $i;
+        if (substr($str, $i, 1) eq "\n") {
+            $line++;
+            $col = 0;
+        }
+        if ($pos == $i) { return ($line, $col, $tpl_file) }
     }
 
-    return ($line, $col, $tpl_file) if $pos == length $str;
+    if ($pos == length $str) { return ($line, $col, $tpl_file) }
     return (-1, -1, $tpl_file);
 }
 
@@ -891,8 +896,8 @@ sub _if_rules_from_tokens {
 
     for my $i (0 .. $num - 1) {
         my $item = $toks->[$i];
-        $nested++ if $item =~ /^\{if/;
-        $nested-- if $item eq '{/if}';
+        if ($item =~ /^\{if/) { $nested++ }
+        if ($item eq '{/if}') { $nested-- }
 
         my $yes = 0;
         if ($nested == 1) {
