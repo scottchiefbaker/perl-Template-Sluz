@@ -961,6 +961,8 @@ Template::Sluz - A minimalistic Perl templating engine with Smarty-like syntax
 
 =head1 SYNOPSIS
 
+File: C<main.pl>
+
     use Template::Sluz;
 
     my $s = Template::Sluz->new();
@@ -969,7 +971,23 @@ Template::Sluz - A minimalistic Perl templating engine with Smarty-like syntax
     $s->assign('array' => ['one', 'two', 'three']);
     $s->assign('hash'  => { color => 'red', age => 39});
 
-    print $s->fetch('tpls/page.stpl');
+    print $s->fetch('template.stpl');
+
+File: C<template.stpl>
+
+    Hello {$name}
+
+    Nums: {foreach $array as $x}{$x} {/foreach}
+
+    Info: {$hash.color} / {$hash.age}
+
+Output:
+
+    Hello Scott
+
+    Nums: one two three
+
+    Info: red / 39
 
 =head1 METHODS
 
