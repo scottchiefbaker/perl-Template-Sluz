@@ -128,13 +128,16 @@ sub display {
     print $self->fetch(@_);
 }
 
+# Parse a string instead of a file
 sub parse_string {
     my $self    = shift;
     my $tpl_str = shift // '';
     my @blocks  = $self->_get_blocks($tpl_str);
+
     return $self->_process_blocks(\@blocks);
 }
 
+# Getter/setter for parent TPL
 sub parent_tpl {
     my $self = shift;
 
@@ -145,6 +148,7 @@ sub parent_tpl {
     return $self->{parent_tpl};
 }
 
+# Dive down an array or hashref using our dotted syntax
 sub array_dive {
     my $self     = shift;
     my $needle   = shift;
@@ -192,6 +196,7 @@ sub find_ending_tag {
     my $open_tag  = shift;
     my $close_tag = shift;
 
+    # Find the first close tag; if there's only one open tag before it, we're done
     my $pos = index($haystack, $close_tag);
     return undef if $pos < 0;
 
@@ -199,6 +204,8 @@ sub find_ending_tag {
     my $open_count = () = $substr =~ /\Q$open_tag\E/g;
     return $pos if $open_count == 1;
 
+    # Nested tags: scan forward through subsequent close tags until
+    # open/close counts balance (max 5 nesting levels)
     my $close_len = length $close_tag;
     my $offset    = $pos + $close_len;
 
