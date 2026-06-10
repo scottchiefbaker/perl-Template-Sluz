@@ -5,10 +5,11 @@ LICENSE
 Makefile.PL
 MANIFEST
 README.md
-t/tests.t
+t/01-main.t
 t/tpls/child.stpl
 t/tpls/extra.stpl
 t/tpls/parent.stpl
 tpls/child.stpl
 tpls/extra.stpl
 tpls/parent.stpl
+example.pl
