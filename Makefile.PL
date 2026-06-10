@@ -16,11 +16,11 @@ WriteMakefile(
         resources => {
             repository => {
                 type => 'git',
-                url  => 'https://github.com/scottchiefbaker/perl-sluz.git',
-                web  => 'https://github.com/scottchiefbaker/perl-sluz',
+                url  => 'https://github.com/scottchiefbaker/perl-Template-Sluz.git',
+                web  => 'https://github.com/scottchiefbaker/perl-Template-Sluz',
             },
             bugtracker => {
-                web => 'https://github.com/scottchiefbaker/perl-sluz/issues',
+                web => 'https://github.com/scottchiefbaker/perl-Template-Sluz/issues',
             },
         },
     },
