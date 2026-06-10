@@ -57,9 +57,13 @@ sub new {
 
 sub assign {
     my $self = shift;
+
+    # Accept either a hashref: assign($hash_ref)
     if (@_ == 1 && ref $_[0] eq 'HASH') {
         my $h = shift;
         @{$self->{tpl_vars}}{keys %$h} = values %$h;
+
+    # Or a key-value list: assign(name => 'Scott', age => 42)
     } elsif (@_ % 2 == 0) {
         my %h = @_;
         @{$self->{tpl_vars}}{keys %h} = values %h;
@@ -133,8 +137,10 @@ sub array_dive {
 
     return undef unless defined $needle && defined $haystack;
 
+    # Quick path: needle is a direct key in the hash
     return $haystack->{$needle} if exists $haystack->{$needle};
 
+    # Walk dotted path (e.g. "user.address.city") through nested structures
     my @parts = split /\./, $needle;
     my $arr   = $haystack;
 
