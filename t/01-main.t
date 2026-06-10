@@ -283,14 +283,15 @@ sluz_test('{}'                                    , '{}'                 , 'Lite
 # -------------------------------------------------------------------
 # Whitespace input/output
 # -------------------------------------------------------------------
-sluz_test("{\$x}{\$x}"                                   , '77'           , 'Whitespace input/output #1');
-sluz_test("{\$x} {\$x}"                                  , '7 7'          , 'Whitespace input/output #2');
-sluz_test("{\$x}\n{\$x}"                                 , "7\n7"         , 'Whitespace input/output #3');
-sluz_test("{foreach \$y as \$x}{\$x}{/foreach}"          , '246'          , 'Whitespace input/output #4');
-sluz_test("{foreach \$y as \$x}\n{\$x}\n{/foreach}"      , "2\n4\n6\n"    , 'Whitespace input/output #5');
-sluz_test("{if \$x}{\$x}{/if}"                           , '7'            , 'Whitespace input/output #6');
-sluz_test("{if \$x}\n{\$x}\n{/if}"                       , "7\n"          , 'Whitespace input/output #7');
-sluz_test("{foreach \$y as \$x}\n{\$x}\n{/foreach}\nlast", "2\n4\n6\nlast", 'Whitespace input/output #8');
+sluz_test("{\$x}{\$x}"                                   , '77'                 , 'Whitespace input/output #1');
+sluz_test("{\$x} {\$x}"                                  , '7 7'                , 'Whitespace input/output #2');
+sluz_test("{\$x}\n{\$x}"                                 , "7\n7"               , 'Whitespace input/output #3');
+sluz_test("{foreach \$y as \$x}{\$x}{/foreach}"          , '246'                , 'Whitespace input/output #4');
+sluz_test("{foreach \$y as \$x}\n{\$x}\n{/foreach}"      , "2\n4\n6\n"          , 'Whitespace input/output #5');
+sluz_test("{if \$x}{\$x}{/if}"                           , '7'                  , 'Whitespace input/output #6');
+sluz_test("{if \$x}\n{\$x}\n{/if}"                       , "7\n"                , 'Whitespace input/output #7');
+sluz_test("{foreach \$y as \$x}\n{\$x}\n{/foreach}\nlast", "2\n4\n6\nlast"      , 'Whitespace input/output #8');
+sluz_test("{foreach \$array as \$x}{\$x} {/foreach}\nEND", "one two three \nEND", 'Whitespace input/output #9');
 
 # -------------------------------------------------------------------
 # Comment tests
