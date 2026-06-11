@@ -660,6 +660,31 @@ sub _foreach_block {
             $ret .= $self->_process_blocks(\@blocks);
             $idx++;
         }
+    } elsif (ref $src eq 'HASH') {
+        my @keys = keys %$src;
+        my $last = $#keys;
+        for my $i (0 .. $last) {
+            my $k = $keys[$i];
+            if ($idx == 0) {
+                $self->{tpl_vars}{__FOREACH_FIRST} = 1;
+            } else {
+                $self->{tpl_vars}{__FOREACH_FIRST} = 0;
+            }
+            if ($idx == $last) {
+                $self->{tpl_vars}{__FOREACH_LAST} = 1;
+            } else {
+                $self->{tpl_vars}{__FOREACH_LAST} = 0;
+            }
+            $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
+            if (defined $oval) {
+                $self->{tpl_vars}{$okey} = $k;
+                $self->{tpl_vars}{$oval} = $src->{$k};
+            } else {
+                $self->{tpl_vars}{$okey} = $src->{$k};
+            }
+            $ret .= $self->_process_blocks(\@blocks);
+            $idx++;
+        }
     }
 
     $self->{tpl_vars} = \%save;
