@@ -46,6 +46,13 @@ sub count {
     return 0;
 }
 
+sub join {
+    my $arr  = shift();
+    my $glue = shift() // ', ';
+
+    return CORE::join($glue, @$arr);
+}
+
 ################################################################################
 ################################################################################
 
@@ -552,19 +559,24 @@ sub _variable_block {
 
                 {
                     no strict 'refs';
-                    my $callable = defined &{"main::$func"} || defined &{"CORE::$func"} || defined &{$func};
+
+					# Priority: main::, Template::Sluz built-ins, then CORE::
+                    my $callable = defined &{"main::$func"} || defined &{$func} || defined &{"CORE::$func"};
+
                     if (!$callable) {
                         my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
                         $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
                     }
+
                     if (defined &{"main::$func"}) {
                         $pre = eval { &{"main::$func"}(@params) };
-                    } elsif (defined &{"CORE::$func"}) {
-                        $pre = eval { &{"CORE::$func"}(@params) };
-                    } else {
+                    } elsif (defined &{$func}) {
                         $pre = eval { &{$func}(@params) };
+                    } else {
+                        $pre = eval { &{"CORE::$func"}(@params) };
                     }
                 }
+
                 if ($@) {
                     $self->_error_out("Exception: $@", 79134);
                 }
