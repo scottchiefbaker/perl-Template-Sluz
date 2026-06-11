@@ -471,7 +471,7 @@ sub _process_block {
     $self->{char_pos} = $char_pos;
 
     # 1. Variable block {$foo} or {$foo|modifier}
-    if (substr($str, 0, 2) eq '{$' && $str =~ /^\{\$([\w|.'";\t :,!@#%^&*?_\-]+)\}$/) {
+    if (substr($str, 0, 2) eq '{$' && $str =~ /^\{\$([\w|.'";\t :,!@#%^&*?_\/\\\-]+)\}$/) {
         return $self->_variable_block($1);
     }
 
