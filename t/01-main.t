@@ -47,9 +47,12 @@ $sluz->assign('null'         => undef);
 $sluz->assign('true'         => 1);
 $sluz->assign('false'        => 0);
 $sluz->assign('conf'         => {main => 1, debug => 0});
+$sluz->assign('colors', {a => 'red', b => 'green', c => 'blue'});
+$sluz->assign('scores', {math => 95, science => 88, art => 76});
+$sluz->assign('inc_file', 'tpls/extra.stpl');
 $sluz->assign({color => 'yellow', age => 43, book => 'Dark Tower'});
 
-$sluz->{php_file_dir} = dirname(__FILE__);
+$sluz->{perl_file_dir} = dirname(__FILE__);
 
 # -------------------------------------------------------------------
 # Test helpers
@@ -150,7 +153,12 @@ sluz_test('{$first|substr:2,2}',                     'ot',                      
     sluz_test('{if !$cust.age}unknown{else}{$age}{/if}', 'unknown',                 'Basic #28 - Negated hash lookup');
 }
 
-sluz_test('{1.1234 + 2.3456}',                       '3.469',                       'Basic #29 - Simple math that returns floating point');
+sluz_test('{1.1234 + 2.3456}', '3.469', 'Basic #29 - Simple math that returns floating point');
+sluz_test(''                 , ''     , 'Basic #30 - Empty template');
+sluz_test(' '                , ' '    , 'Basic #31 - Whitespace only template');
+sluz_test('{$bogus_var + 3}' , '3'    , 'Basic #32 - Undefined var in numeric expression');
+sluz_test('{!$false}'        , '1'    , 'Basic #33 - Standalone negated expression (false to true)');
+sluz_test('{!$true}'         , ''     , 'Basic #34 - Standalone negated expression (true to false)');
 
 # -------------------------------------------------------------------
 # Custom/User functions
@@ -199,33 +207,36 @@ like($@, qr/73467/, 'Error #4 - syntax error');
 # -------------------------------------------------------------------
 # If tests
 # -------------------------------------------------------------------
-sluz_test('{if $debug}DEBUG{/if}'                                , 'DEBUG'   , 'If #1 - Simple');
-sluz_test('{if $bogus_var}DEBUG{/if}'                            , ''        , 'If #2 - Missing var');
-sluz_test('{if $debug}{$first}{/if}'                             , 'Scott'   , 'If #3 - Variable as payload');
-sluz_test('{if $debug}{if $debug}FOO{/if}{/if}'                  , 'FOO'     , 'If #4 - Nested');
-sluz_test('{if $x}{if $null}yes{else}no{/if}{/if}'               , 'no'      , 'If #5 - Nested with else');
-sluz_test('{if $one}{if $name}Yes{else}No{/if}{else}Unknown{/if}', 'Unknown' , 'If #6 - Nested with two elses');
-sluz_test('{if $bogus_var}YES{else}NO{/if}'                      , 'NO'      , 'If #7 - Else');
-sluz_test('{if $cust.first}{$cust.first}{/if}'                   , 'Scott'   , 'If #8 - Hash lookup');
-sluz_test('{if $number > 10}GREATER{/if}'                        , 'GREATER' , 'If #9 - Comparison');
-sluz_test('{if $bogus_var || $key}KEY{/if}'                      , 'KEY'     , 'If #10 - ||');
-sluz_test('{if $number == 15 && $debug}YES{/if}'                 , 'YES'     , 'If #11 - Two comparisons');
-sluz_test('{if !$verbose}QUIET{/if}'                             , 'QUIET'   , 'If #12 - Negated comparison');
-sluz_test('{if ($zero || $number > 10)}YES{/if}'                 , 'YES'     , 'If #13 - Parens');
-sluz_test('{if count($array) > 2}YES{/if}'                       , 'YES'     , 'If #14 - PHP function conditional');
-sluz_test('{if $debug}{$key}{$last}{/if}'                        , 'valBaker', 'If #15 - Two block payload');
-sluz_test('{if $debug}ONE{else}TWO{/if}'                         , 'ONE'     , 'If #16 - Else not needed');
-sluz_test('{if $zero}1{elseif $debug}2{else}3{/if}'              , '2'       , 'If #17 - Elseif');
-sluz_test('{if $key}{if $one}one{elseif $x}X{else}ELSE{/if}{/if}', 'X'       , 'If #18 - Nested if with elseif');
-sluz_test('{if $number}1{if $key}2{/if}3{/if}'                   , '123'     , 'If #19 - Nested if leading/trailing chars');
-sluz_test('{if $true}123{else}456{/if}'                          , '123'     , 'If #20 - Boolean');
-sluz_test('{if !$true}123{else}456{/if}'                         , '456'     , 'If #21 - Boolean inverted');
-sluz_test('{if $conf.main}123{else}456{/if}'                     , '123'     , 'If #22 - Hash boolean');
-sluz_test('{if !$conf.main}123{else}456{/if}'                    , '456'     , 'If #23 - Hash boolean inverted');
-sluz_test('{if $x}{if $y}yes{/if}{else}no{/if}'                  , 'yes'     , 'If #24 - Nested if with an else');
-sluz_test('{if true}a{else}b{if true}c{/if}{/if}'                , 'a'       , 'If #25 - Nested with true');
-sluz_test('{if false}a{else}b{if true}c{/if}{/if}'               , 'bc'      , 'If #26 - Nested with false');
-sluz_test('{if true}{/if}'                                       , ''        , 'If #27 - If with "" for payload');
+sluz_test('{if $debug}DEBUG{/if}'                                                 , 'DEBUG'   , 'If #1 - Simple');
+sluz_test('{if $bogus_var}DEBUG{/if}'                                             , ''        , 'If #2 - Missing var');
+sluz_test('{if $debug}{$first}{/if}'                                              , 'Scott'   , 'If #3 - Variable as payload');
+sluz_test('{if $debug}{if $debug}FOO{/if}{/if}'                                   , 'FOO'     , 'If #4 - Nested');
+sluz_test('{if $x}{if $null}yes{else}no{/if}{/if}'                                , 'no'      , 'If #5 - Nested with else');
+sluz_test('{if $one}{if $name}Yes{else}No{/if}{else}Unknown{/if}'                 , 'Unknown' , 'If #6 - Nested with two elses');
+sluz_test('{if $bogus_var}YES{else}NO{/if}'                                       , 'NO'      , 'If #7 - Else');
+sluz_test('{if $cust.first}{$cust.first}{/if}'                                    , 'Scott'   , 'If #8 - Hash lookup');
+sluz_test('{if $number > 10}GREATER{/if}'                                         , 'GREATER' , 'If #9 - Comparison');
+sluz_test('{if $bogus_var || $key}KEY{/if}'                                       , 'KEY'     , 'If #10 - ||');
+sluz_test('{if $number == 15 && $debug}YES{/if}'                                  , 'YES'     , 'If #11 - Two comparisons');
+sluz_test('{if !$verbose}QUIET{/if}'                                              , 'QUIET'   , 'If #12 - Negated comparison');
+sluz_test('{if ($zero || $number > 10)}YES{/if}'                                  , 'YES'     , 'If #13 - Parens');
+sluz_test('{if count($array) > 2}YES{/if}'                                        , 'YES'     , 'If #14 - PHP function conditional');
+sluz_test('{if $debug}{$key}{$last}{/if}'                                         , 'valBaker', 'If #15 - Two block payload');
+sluz_test('{if $debug}ONE{else}TWO{/if}'                                          , 'ONE'     , 'If #16 - Else not needed');
+sluz_test('{if $zero}1{elseif $debug}2{else}3{/if}'                               , '2'       , 'If #17 - Elseif');
+sluz_test('{if $key}{if $one}one{elseif $x}X{else}ELSE{/if}{/if}'                 , 'X'       , 'If #18 - Nested if with elseif');
+sluz_test('{if $number}1{if $key}2{/if}3{/if}'                                    , '123'     , 'If #19 - Nested if leading/trailing chars');
+sluz_test('{if $true}123{else}456{/if}'                                           , '123'     , 'If #20 - Boolean');
+sluz_test('{if !$true}123{else}456{/if}'                                          , '456'     , 'If #21 - Boolean inverted');
+sluz_test('{if $conf.main}123{else}456{/if}'                                      , '123'     , 'If #22 - Hash boolean');
+sluz_test('{if !$conf.main}123{else}456{/if}'                                     , '456'     , 'If #23 - Hash boolean inverted');
+sluz_test('{if $x}{if $y}yes{/if}{else}no{/if}'                                   , 'yes'     , 'If #24 - Nested if with an else');
+sluz_test('{if true}a{else}b{if true}c{/if}{/if}'                                 , 'a'       , 'If #25 - Nested with true');
+sluz_test('{if false}a{else}b{if true}c{/if}{/if}'                                , 'bc'      , 'If #26 - Nested with false');
+sluz_test('{if true}{/if}'                                                        , ''        , 'If #27 - If with "" for payload');
+sluz_test('{if $bogus_var}a{elseif $debug}b{elseif $true}c{else}d{/if}'           , 'b'       , 'If #28 - Multiple elseif (first match)');
+sluz_test('{if $bogus_var}a{elseif $bogus_var2}b{elseif $true}c{else}d{/if}'      , 'c'       , 'If #29 - Multiple elseif (second match)');
+sluz_test('{if $bogus_var}a{elseif $bogus_var2}b{elseif $bogus_var3}c{else}d{/if}', 'd'       , 'If #30 - Multiple elseif (all false, else)');
 
 # -------------------------------------------------------------------
 # Foreach tests
@@ -250,10 +261,14 @@ sluz_test('{foreach $array as $i}{foreach $array as $i}x{/foreach}{/foreach}', '
 sluz_test('{$x}', '7', 'Foreach #17 - NOT overwrite variable - previously set');
 sluz_test('{$i}', '' , 'Foreach #18 - NOT overwrite variable - no initial value');
 
-sluz_test('{foreach $y as $z}{$z}{/foreach}'                                   , '246'             , 'Foreach #19 - Foreach one char key');
-sluz_test('{foreach $array as $x}{if $__FOREACH_FIRST}FIRST{/if}{$x}{/foreach}', 'FIRSTonetwothree', 'Foreach #20 - Foreach FIRST item');
-sluz_test('{foreach $array as $x}{$x}{if $__FOREACH_LAST}LAST{/if}{/foreach}'  , 'onetwothreeLAST' , 'Foreach #21 - Foreach LAST item');
-sluz_test('{foreach $array as $x}{$x}{$__FOREACH_INDEX}{/foreach}'             , 'one0two1three2'  , 'Foreach #22 - Foreach index');
+sluz_test('{foreach $y as $z}{$z}{/foreach}'                                   , '246'                                           , 'Foreach #19 - Foreach one char key');
+sluz_test('{foreach $array as $x}{if $__FOREACH_FIRST}FIRST{/if}{$x}{/foreach}', 'FIRSTonetwothree'                              , 'Foreach #20 - Foreach FIRST item');
+sluz_test('{foreach $array as $x}{$x}{if $__FOREACH_LAST}LAST{/if}{/foreach}'  , 'onetwothreeLAST'                               , 'Foreach #21 - Foreach LAST item');
+sluz_test('{foreach $array as $x}{$x}{$__FOREACH_INDEX}{/foreach}'             , 'one0two1three2'                                , 'Foreach #22 - Foreach index');
+sluz_test('{foreach $colors as $k => $v}{$k}:{$v} {/foreach}'                  , '/^[a-z]+:[a-z]+ [a-z]+:[a-z]+ [a-z]+:[a-z]+ $/', 'Foreach #23 - Hashref iteration with key/val');
+sluz_test('{foreach $scores as $val}{$val} {/foreach}'                         , '/^\d+ \d+ \d+ $/'                              , 'Foreach #24 - Hashref iteration value only');
+sluz_test('{foreach $empty as $k => $v}val{/foreach}'                          , ''                                              , 'Foreach #25 - Empty array with key/val');
+sluz_test('{foreach $members as $i => $m}{$i}:{$m.first} {/foreach}'           , '0:Scott 1:Jason '                              , 'Foreach #26 - Array of hashes with key/val');
 
 # -------------------------------------------------------------------
 # Plain text tests
@@ -296,12 +311,14 @@ sluz_test("{foreach \$array as \$x}{\$x} {/foreach}\nEND", "one two three \nEND"
 # -------------------------------------------------------------------
 # Comment tests
 # -------------------------------------------------------------------
-sluz_test('{* Comment *}'           , '', 'Comment #1 - With text');
-sluz_test('{* ********* *}'         , '', 'Comment #2 - ******');
-sluz_test('{**}'                    , '', 'Comment #3 - No whitespace');
-sluz_test('{*{$array|count}*}'      , '', 'Comment #4 - Variable inside');
-sluz_test('{* {* nested *} *}'      , '', 'Comment #5 - Nested');
-sluz_test('{* {* {* nested *} *} *}', '', 'Comment #6 - Triple Nested');
+sluz_test('{* Comment *}'                       , '', 'Comment #1 - With text');
+sluz_test('{* ********* *}'                     , '', 'Comment #2 - ******');
+sluz_test('{**}'                                , '', 'Comment #3 - No whitespace');
+sluz_test('{*{$array|count}*}'                  , '', 'Comment #4 - Variable inside');
+sluz_test('{* {* nested *} *}'                  , '', 'Comment #5 - Nested');
+sluz_test('{* {* {* nested *} *} *}'            , '', 'Comment #6 - Triple Nested');
+sluz_test('{* {* {* {* nested *} *} *} *}'      , '', 'Comment #7 - 4-level nested');
+sluz_test('{* {* {* {* {* nested *} *} *} *} *}', '', 'Comment #8 - 5-level nested (max depth)');
 
 # -------------------------------------------------------------------
 # Include tests
@@ -313,6 +330,9 @@ eval { $sluz->parse_string('{include}') };
 like($@, qr/73467/, 'Include #3 - No payload');
 
 sluz_test("{include file='tpls/extra.stpl' secret='eca4906'}",           '/eca4906/',    'Include #4 - With variable');
+sluz_test("{include file=\"\$inc_file\"}",                              '/e1ab49cf/',   'Include #5 - With variable file path');
+sluz_test("{include file='tpls/nested_inc.stpl'}",                     '/e1ab49cf/',   'Include #6 - Nested include');
+sluz_test("{include file='tpls/var_scope.stpl'}",                      '/SCOPE:15/',   'Include #7 - Variable scope (parent vars visible)');
 
 # -------------------------------------------------------------------
 # Get blocks tests
@@ -382,6 +402,21 @@ sluz_test("{include file='tpls/extra.stpl' secret='eca4906'}",           '/eca49
     is(scalar @b, 3, 'Get blocks #13 - Double whitespace block');
 }
 
+{
+    my @b = $sluz->_get_blocks('');
+    is(scalar @b, 0, 'Get blocks #14 - Empty string');
+}
+
+{
+    my @b = $sluz->_get_blocks('plain text only');
+    is(scalar @b, 1, 'Get blocks #15 - No template tags');
+}
+
+{
+    my @b = $sluz->_get_blocks('{* {* {* {* deep *} *} *} *}');
+    is(scalar @b, 0, 'Get blocks #16 - Deeply nested comment (4 levels)');
+}
+
 # -------------------------------------------------------------------
 # Fetch tests
 # -------------------------------------------------------------------
@@ -399,5 +434,29 @@ $sluz->parent_tpl('tpls/parent.stpl');
 }
 $sluz->parent_tpl(undef);
 $sluz->{parent_tpl} = undef;
+
+# -------------------------------------------------------------------
+# Assign edge cases
+# -------------------------------------------------------------------
+$sluz->assign('odd_args_test');
+is($sluz->{tpl_vars}{odd_args_test}, undef, 'Assign #1 - Odd number of args (no-op)');
+
+$sluz->assign({});
+is($sluz->{tpl_vars}{odd_args_test}, undef, 'Assign #2 - Empty hashref (no-op)');
+
+# -------------------------------------------------------------------
+# Variable edge cases
+# -------------------------------------------------------------------
+$sluz->assign('hashref', {nested => {deep => 'found'}});
+sluz_test('{$hashref.nested.deep}',               'found',                     'Deep dive #1 - Three-level dotted hash access');
+sluz_test('{$bogus_var}',                         '',                          'Deep dive #2 - Undefined variable returns empty');
+sluz_test('{$null}',                              '',                          'Deep dive #3 - null variable returns empty');
+sluz_test('{$array}',                             'ARRAY',                     'Deep dive #4 - Array returned as scalar');
+
+# -------------------------------------------------------------------
+# Error edge cases
+# -------------------------------------------------------------------
+eval { $sluz->parse_string('{if}') };
+like($@, qr/73467/, 'Error #5 - Bare {if} without condition');
 
 done_testing();
