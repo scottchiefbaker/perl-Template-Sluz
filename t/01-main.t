@@ -179,6 +179,11 @@ sluz_test('{$y|join_comma:"\'"}',                    "2'4'6",                   
 sluz_test('{$y|join_comma:"; "}',                    "2; 4; 6",                     'Custom function #9 - Function with string param and space');
 sluz_test("{\$y|join_comma:\"\t\"}",                 "2\t4\t6",                     'Custom function #10 - Function with string param and tab');
 
+# Built-in join modifier
+sluz_test('{$array|join}',                           'one, two, three',             'Built-in join #1 - default glue');
+sluz_test('{$array|join:" - "}',                     'one - two - three',           'Built-in join #2 - custom glue');
+sluz_test('{$array|join:","}',                       'one,two,three',               'Built-in join #3 - comma glue');
+
 # -------------------------------------------------------------------
 # Function blocks
 # -------------------------------------------------------------------
