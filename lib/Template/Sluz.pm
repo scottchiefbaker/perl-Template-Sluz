@@ -535,6 +535,9 @@ sub _variable_block {
         } elsif (!$is_nothing && $is_default) {
             return $self->array_dive($key, $self->{tpl_vars}) // '';
         } else {
+            if ($is_nothing) {
+                return '';
+            }
             my $pre = $self->array_dive($key, $self->{tpl_vars}) // '';
 
             # Split on | not inside double or single quotes (supports chained
