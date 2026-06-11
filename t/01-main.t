@@ -452,11 +452,11 @@ $sluz->{parent_tpl} = undef;
 # -------------------------------------------------------------------
 # Assign edge cases
 # -------------------------------------------------------------------
-$sluz->assign('odd_args_test');
-is($sluz->{tpl_vars}{odd_args_test}, undef, 'Assign #1 - Odd number of args (no-op)');
+eval { $sluz->assign('odd_args_test'); };
+like($@, qr/#18956/, 'Assign #1 - Odd number of args (no-op)');
 
-$sluz->assign({});
-is($sluz->{tpl_vars}{odd_args_test}, undef, 'Assign #2 - Empty hashref (no-op)');
+eval { $sluz->assign({}); };
+is($@, "", 'Assign #2 - Empty hashref (no-op)');
 
 # -------------------------------------------------------------------
 # Variable edge cases
