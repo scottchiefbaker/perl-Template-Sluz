@@ -134,31 +134,37 @@ sluz_test('{$empty_string|default:\'123\'}',         '123',                     
 sluz_test('{$null|default:\'123\'}',                 '123',                         'Basic #18 - Default - Null');
 sluz_test('{$bogus_var|default:"?*%.|"}',            '?*%.|',                       'Basic #19 - Default - non word char');
 
+# Undefined variables with modifiers
+sluz_test('{$bogus_var|join}',                        '',                            'Basic #20 - Undefined var with array modifier');
+sluz_test('{$bogus_var|uc}',                          '',                            'Basic #21 - Undefined var with string modifier');
+sluz_test('{$bogus_var|count}',                       '',                            'Basic #22 - Undefined var with count modifier');
+sluz_test('{$bogus_var|substr:0,2}',                  '',                            'Basic #23 - Undefined var with string modifier with params');
+
 # Error tests (croak via eval)
 eval { $sluz->parse_string('{foo') };
-like($@, qr/45821/, 'Basic #20 - Unclosed block');
+like($@, qr/45821/, 'Basic #24 - Unclosed block');
 
 eval { $sluz->parse_string('{$first') };
-like($@, qr/45821/, 'Basic #21 - Unclosed block variable');
+like($@, qr/45821/, 'Basic #25 - Unclosed block variable');
 
 # Hash with default
-sluz_test('{$cust.first|default:\'Jason\'}',         'Scott',                       'Basic #22 - Hash with default value, not used');
-sluz_test('{$cust.foo|default:\'Jason\'}',           'Jason',                       'Basic #23 - Hash with default value, used');
-sluz_test('{$array}',                                'ARRAY',                       'Basic #24 - Array used as a scalar');
-sluz_test('{$first|substr:2}',                       'ott',                         'Basic #26 - PHP function with one param');
-sluz_test('{$first|substr:2,2}',                     'ot',                          'Basic #27 - PHP function with two params');
+sluz_test('{$cust.first|default:\'Jason\'}',         'Scott',                       'Basic #26 - Hash with default value, not used');
+sluz_test('{$cust.foo|default:\'Jason\'}',           'Jason',                       'Basic #27 - Hash with default value, used');
+sluz_test('{$array}',                                'ARRAY',                       'Basic #28 - Array used as a scalar');
+sluz_test('{$first|substr:2}',                       'ott',                         'Basic #29 - PHP function with one param');
+sluz_test('{$first|substr:2,2}',                     'ot',                          'Basic #30 - PHP function with two params');
 
 {
     local $TODO = "Negated hash lookup";
-    sluz_test('{if !$cust.age}unknown{else}{$age}{/if}', 'unknown',                 'Basic #28 - Negated hash lookup');
+    sluz_test('{if !$cust.age}unknown{else}{$age}{/if}', 'unknown',                 'Basic #31 - Negated hash lookup');
 }
 
-sluz_test('{1.1234 + 2.3456}', '3.469', 'Basic #29 - Simple math that returns floating point');
-sluz_test(''                 , ''     , 'Basic #30 - Empty template');
-sluz_test(' '                , ' '    , 'Basic #31 - Whitespace only template');
-sluz_test('{$bogus_var + 3}' , '3'    , 'Basic #32 - Undefined var in numeric expression');
-sluz_test('{!$false}'        , '1'    , 'Basic #33 - Standalone negated expression (false to true)');
-sluz_test('{!$true}'         , ''     , 'Basic #34 - Standalone negated expression (true to false)');
+sluz_test('{1.1234 + 2.3456}', '3.469', 'Basic #32 - Simple math that returns floating point');
+sluz_test(''                 , ''     , 'Basic #33 - Empty template');
+sluz_test(' '                , ' '    , 'Basic #34 - Whitespace only template');
+sluz_test('{$bogus_var + 3}' , '3'    , 'Basic #35 - Undefined var in numeric expression');
+sluz_test('{!$false}'        , '1'    , 'Basic #36 - Standalone negated expression (false to true)');
+sluz_test('{!$true}'         , ''     , 'Basic #37 - Standalone negated expression (true to false)');
 
 # -------------------------------------------------------------------
 # Custom/User functions
