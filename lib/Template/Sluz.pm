@@ -89,7 +89,9 @@ sub assign {
     } elsif (@_ % 2 == 0) {
         my %h = @_;
         @{$self->{tpl_vars}}{keys %h} = values %h;
-    }
+    } else {
+        $self->_error_out("Invalid assign. Must be a key/value or hash", 18956);
+	}
 }
 
 sub fetch {
