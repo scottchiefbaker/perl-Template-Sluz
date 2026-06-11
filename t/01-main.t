@@ -124,17 +124,8 @@ sluz_test('{$number * $debug}',                      '15',                      
 sluz_test('{3}',                                     '3',                           'Basic #10 - Number literal');
 sluz_test('{"Scott"}',                               'Scott',                       'Basic #11 - String literal');
 sluz_test('{$x}',                                    '7',                           'Basic #12 - Single Character variable');
-
-# PHP bracket syntax
-{
-    local $TODO = "PHP bracket syntax";
-    sluz_test('{$array[1]}',                         'two',                         'Basic #13 - Array Lookup - PHP Syntax');
-}
-
-{
-    local $TODO = "PHP bracket syntax";
-    sluz_test('{$cust["last"]}',                     'Baker',                       'Basic #14 - Hash Lookup - PHP Syntax');
-}
+sluz_test('{$array[1]}',                             'two',                         'Basic #13 - Array Lookup - PHP Syntax');
+sluz_test('{$cust["last"]}',                         'Baker',                       'Basic #14 - Hash Lookup - PHP Syntax');
 
 # Default values
 sluz_test('{$last|default:\'123\'}',                 'Baker',                       'Basic #15 - Default - Not Used');
