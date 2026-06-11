@@ -142,6 +142,11 @@ modifier:
 {$text|substr:0,10}
 ```
 
+When a function is called as a modifier the template variable is passed first
+and then it is followed by the params.
+
+Example: `{$text|substr:0,10}` would map to the call `substr($text, 0, 10)`
+
 ## Author
 
 Scott Baker - https://www.perturb.org/

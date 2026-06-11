@@ -1073,6 +1073,11 @@ modifier:
     {$items|join:' - '}
     {$text|substr:0,10}
 
+When a function is called as a modifier the template variable is passed first
+and then it is followed by the params.
+
+Example: C<{$text|substr:0,10}> would map to the call C<substr($text, 0, 10)>
+
 =head1 AUTHOR
 
 Scott Baker - https://www.perturb.org/
