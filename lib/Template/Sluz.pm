@@ -63,7 +63,6 @@ sub new {
         tpl_file      => undef,
         inc_tpl_file  => undef,
         debug         => 0,
-        in_unit_test  => 0,
         tpl_vars      => {},
         parent_tpl    => undef,
         var_prefix    => 'sluz_pfx',
