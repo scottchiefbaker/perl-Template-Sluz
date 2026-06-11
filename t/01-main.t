@@ -337,86 +337,86 @@ sluz_test("{include file='tpls/var_scope.stpl'}"             , '/SCOPE:15/', 'In
 # -------------------------------------------------------------------
 # Get blocks tests
 # -------------------------------------------------------------------
+
 {
-    my @b = $sluz->_get_blocks('{$a}{$b}{$c}');
-    is(scalar @b, 3, 'Get blocks #1 - Basic variables');
+	my @x = $sluz->_get_blocks('{$a}{$b}{$c}');
+	is(scalar @x, 3, 'Get blocks #1 - Basic variables');
 }
 
 {
-    my @b = $sluz->_get_blocks('{if $a}{$a}{/if}');
-    is(scalar @b, 1, 'Get blocks #2 - Basic variables');
+	my @x = $sluz->_get_blocks('{if $a}{$a}{/if}');
+	is(scalar @x, 1, 'Get blocks #2 - Basic variables');
 }
 
 {
-    my @b = $sluz->_get_blocks('Jason{$a}Baker{$b}');
-    is(scalar @b, 4, 'Get blocks #3 - Basic variables');
+	my @x = $sluz->_get_blocks('Jason{$a}Baker{$b}');
+	is(scalar @x, 4, 'Get blocks #3 - Basic variables');
 }
 
 {
-    my @b = $sluz->_get_blocks('function(foo) { $i = 10; }');
-    is(scalar @b, 1, 'Get blocks #4 - javascript function');
+	my @x = $sluz->_get_blocks('function(foo) { $i = 10; }');
+	is(scalar @x, 1, 'Get blocks #4 - javascript function');
 }
 
 {
-    my @b = $sluz->_get_blocks('{* Comment *}ABC{* Comment *}');
-    is(scalar @b, 1, 'Get blocks #5 - Comments');
+	my @x = $sluz->_get_blocks('{* Comment *}ABC{* Comment *}');
+	is(scalar @x, 1, 'Get blocks #5 - Comments');
 }
 
 {
-    my @b = $sluz->_get_blocks('   {$x}   ');
-    is(scalar @b, 3, 'Get blocks #6 - Whitespace around variable');
+	my @x = $sluz->_get_blocks('   {$x}   ');
+	is(scalar @x, 3, 'Get blocks #6 - Whitespace around variable');
 }
 
 {
-    my @b = $sluz->_get_blocks('{foreach $arr as $i => $x}{if $x.1}{$x.1}{/if}{/foreach}');
-    is(scalar @b, 1, 'Get blocks #7 - Lots of brackets');
+	my @x = $sluz->_get_blocks('{foreach $arr as $i => $x}{if $x.1}{$x.1}{/if}{/foreach}');
+	is(scalar @x, 1, 'Get blocks #7 - Lots of brackets');
 }
 
 {
-    my @b = $sluz->_get_blocks('{*{$first}*}');
-    is(scalar @b, 0, 'Get blocks #8 - Comment with variable');
+	my @x = $sluz->_get_blocks('{*{$first}*}');
+	is(scalar @x, 0, 'Get blocks #8 - Comment with variable');
 }
 
 {
-    my @b = $sluz->_get_blocks('{*{$first} {$last}*}');
-    is(scalar @b, 0, 'Get blocks #9 - Comments with variables');
+	my @x = $sluz->_get_blocks('{*{$first} {$last}*}');
+	is(scalar @x, 0, 'Get blocks #9 - Comments with variables');
 }
 
 {
-    my @b = $sluz->_get_blocks(' {* {$foo} *} ');
-    is(scalar @b, 2, 'Get blocks #10 - Comments with variables and whitespace');
+	my @x = $sluz->_get_blocks(' {* {$foo} *} ');
+	is(scalar @x, 2, 'Get blocks #10 - Comments with variables and whitespace');
 }
 
 {
-    my @b = $sluz->_get_blocks('{foreach $array as $i}{foreach $array as $i}x{/foreach}{/foreach}');
-    is(scalar @b, 1, 'Get blocks #11 - Nested foreach');
+	my @x = $sluz->_get_blocks('{foreach $array as $i}{foreach $array as $i}x{/foreach}{/foreach}');
+	is(scalar @x, 1, 'Get blocks #11 - Nested foreach');
 }
 
 {
-    my @b = $sluz->_get_blocks("{\$foo}\n{\$bar}");
-    is(scalar @b, 3, 'Get blocks #12 - Only whitespace block');
+	my @x = $sluz->_get_blocks("{\$foo}\n{\$bar}");
+	is(scalar @x, 3, 'Get blocks #12 - Only whitespace block');
 }
 
 {
-    my @b = $sluz->_get_blocks("{\$foo}\n\n{\$bar}");
-    is(scalar @b, 3, 'Get blocks #13 - Double whitespace block');
+	my @x = $sluz->_get_blocks("{\$foo}\n\n{\$bar}");
+	is(scalar @x, 3, 'Get blocks #13 - Double whitespace block');
 }
 
 {
-    my @b = $sluz->_get_blocks('');
-    is(scalar @b, 0, 'Get blocks #14 - Empty string');
+	my @x = $sluz->_get_blocks('');
+	is(scalar @x, 0, 'Get blocks #14 - Empty string');
 }
 
 {
-    my @b = $sluz->_get_blocks('plain text only');
-    is(scalar @b, 1, 'Get blocks #15 - No template tags');
+	my @x = $sluz->_get_blocks('plain text only');
+	is(scalar @x, 1, 'Get blocks #15 - No template tags');
 }
 
 {
-    my @b = $sluz->_get_blocks('{* {* {* {* deep *} *} *} *}');
-    is(scalar @b, 0, 'Get blocks #16 - Deeply nested comment (4 levels)');
+	my @x = $sluz->_get_blocks('{* {* {* {* deep *} *} *} *}');
+	is(scalar @x, 0, 'Get blocks #16 - Deeply nested comment (4 levels)');
 }
-
 # -------------------------------------------------------------------
 # Fetch tests
 # -------------------------------------------------------------------
