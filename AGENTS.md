@@ -21,7 +21,7 @@ make test
 - Several tests wrapped in `local $TODO = "..."` blocks — features not yet implemented (PHP bracket syntax `{$array[1]}`, negated hash lookup `{if !$cust.age}`, `join_comma` numeric param)
 - `sluz_test()` and `sluz_fetch_test()` are custom test helpers; check their definitions before adding new tests
 
-- `{foreach}` now handles both ARRAY and HASH refs; hash iteration uses `keys()` order (non-deterministic)
+- `{foreach}` now handles both ARRAY and HASH refs; hash iteration uses sorted key order (deterministic)
 
 ## Architecture notes
 - `fetch(file, [parent])` — main entry point; also aliased as `parse()` and `display()` (prints output)

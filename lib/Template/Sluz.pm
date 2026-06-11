@@ -661,7 +661,7 @@ sub _foreach_block {
             $idx++;
         }
     } elsif (ref $src eq 'HASH') {
-        my @keys = keys %$src;
+        my @keys = sort keys %$src;
         my $last = $#keys;
         for my $i (0 .. $last) {
             my $k = $keys[$i];

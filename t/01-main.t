@@ -261,14 +261,14 @@ sluz_test('{foreach $array as $i}{foreach $array as $i}x{/foreach}{/foreach}', '
 sluz_test('{$x}', '7', 'Foreach #17 - NOT overwrite variable - previously set');
 sluz_test('{$i}', '' , 'Foreach #18 - NOT overwrite variable - no initial value');
 
-sluz_test('{foreach $y as $z}{$z}{/foreach}'                                   , '246'                                           , 'Foreach #19 - Foreach one char key');
-sluz_test('{foreach $array as $x}{if $__FOREACH_FIRST}FIRST{/if}{$x}{/foreach}', 'FIRSTonetwothree'                              , 'Foreach #20 - Foreach FIRST item');
-sluz_test('{foreach $array as $x}{$x}{if $__FOREACH_LAST}LAST{/if}{/foreach}'  , 'onetwothreeLAST'                               , 'Foreach #21 - Foreach LAST item');
-sluz_test('{foreach $array as $x}{$x}{$__FOREACH_INDEX}{/foreach}'             , 'one0two1three2'                                , 'Foreach #22 - Foreach index');
-sluz_test('{foreach $colors as $k => $v}{$k}:{$v} {/foreach}'                  , '/^[a-z]+:[a-z]+ [a-z]+:[a-z]+ [a-z]+:[a-z]+ $/', 'Foreach #23 - Hashref iteration with key/val');
-sluz_test('{foreach $scores as $val}{$val} {/foreach}'                         , '/^\d+ \d+ \d+ $/'                              , 'Foreach #24 - Hashref iteration value only');
-sluz_test('{foreach $empty as $k => $v}val{/foreach}'                          , ''                                              , 'Foreach #25 - Empty array with key/val');
-sluz_test('{foreach $members as $i => $m}{$i}:{$m.first} {/foreach}'           , '0:Scott 1:Jason '                              , 'Foreach #26 - Array of hashes with key/val');
+sluz_test('{foreach $y as $z}{$z}{/foreach}'                                   , '246'                  , 'Foreach #19 - Foreach one char key');
+sluz_test('{foreach $array as $x}{if $__FOREACH_FIRST}FIRST{/if}{$x}{/foreach}', 'FIRSTonetwothree'     , 'Foreach #20 - Foreach FIRST item');
+sluz_test('{foreach $array as $x}{$x}{if $__FOREACH_LAST}LAST{/if}{/foreach}'  , 'onetwothreeLAST'      , 'Foreach #21 - Foreach LAST item');
+sluz_test('{foreach $array as $x}{$x}{$__FOREACH_INDEX}{/foreach}'             , 'one0two1three2'       , 'Foreach #22 - Foreach index');
+sluz_test('{foreach $colors as $k => $v}{$k}:{$v} {/foreach}'                  , 'a:red b:green c:blue ', 'Foreach #23 - Hashref iteration with key/val (sorted)');
+sluz_test('{foreach $scores as $val}{$val} {/foreach}'                         , '76 95 88 '            , 'Foreach #24 - Hashref iteration value only (sorted)');
+sluz_test('{foreach $empty as $k => $v}val{/foreach}'                          , ''                     , 'Foreach #25 - Empty array with key/val');
+sluz_test('{foreach $members as $i => $m}{$i}:{$m.first} {/foreach}'           , '0:Scott 1:Jason '     , 'Foreach #26 - Array of hashes with key/val');
 
 # -------------------------------------------------------------------
 # Plain text tests
