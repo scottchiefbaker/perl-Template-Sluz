@@ -8,18 +8,20 @@ make test
 ```
 
 ## Key facts
-- Single-file CPAN-style Perl module: `lib/Template/Sluz.pm` (1029 lines, zero deps)
+- Single-file CPAN-style Perl module: `lib/Template/Sluz.pm` (1118 lines, zero deps)
 - Smarty-like `{...}` template syntax; `{$var}`, `{if}`, `{foreach}`, `{include}`, modifiers via `|`, comments `{* *}`
 - Requires Perl 5.16+; no CPAN prereqs at runtime (only `Test::More` for testing)
 - Module version in `$VERSION` at `Sluz.pm:27`
 
 ## Testing quirks
-- Single test file `t/tests.t` (402 lines, uses `Test::More`)
+- Single test file `t/01-main.t` (462 lines, uses `Test::More`)
 - Test helper functions injected into `main` namespace via `BEGIN` block (line 16-23)
-- Test sets `$sluz->{php_file_dir}` manually (line 52) — needed for template file resolution
-- Template files live in `t/tpls/` (test fixtures) and `tpls/` (examples)
-- Several tests wrapped in `local $TODO = "..."` blocks — features not yet implemented (PHP bracket syntax, negated hash lookup, join_comma numeric param)
+- Test sets `$sluz->{perl_file_dir}` manually (line 55) — needed for template file resolution
+- Template files live in `t/tpls/` (test fixtures: `child.stpl`, `parent.stpl`, `extra.stpl`, `nested_inc.stpl`, `var_scope.stpl`) and `tpls/` (examples)
+- Several tests wrapped in `local $TODO = "..."` blocks — features not yet implemented (PHP bracket syntax `{$array[1]}`, negated hash lookup `{if !$cust.age}`, `join_comma` numeric param)
 - `sluz_test()` and `sluz_fetch_test()` are custom test helpers; check their definitions before adding new tests
+
+- `{foreach}` now handles both ARRAY and HASH refs; hash iteration uses `keys()` order (non-deterministic)
 
 ## Architecture notes
 - `fetch(file, [parent])` — main entry point; also aliased as `parse()` and `display()` (prints output)
