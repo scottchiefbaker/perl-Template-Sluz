@@ -323,16 +323,16 @@ sluz_test('{* {* {* {* {* nested *} *} *} *} *}', '', 'Comment #8 - 5-level nest
 # -------------------------------------------------------------------
 # Include tests
 # -------------------------------------------------------------------
-sluz_test("{include file='tpls/extra.stpl'}",                            '/e1ab49cf/',   'Include #1 - file=extra.stpl');
-sluz_test("{include 'tpls/extra.stpl'}",                                 '/e1ab49cf/',   "Include #2 - 'extra.stpl'");
+sluz_test("{include file='tpls/extra.stpl'}", '/e1ab49cf/', 'Include #1 - file=extra.stpl');
+sluz_test("{include 'tpls/extra.stpl'}"     , '/e1ab49cf/', "Include #2 - 'extra.stpl'");
 
 eval { $sluz->parse_string('{include}') };
 like($@, qr/73467/, 'Include #3 - No payload');
 
-sluz_test("{include file='tpls/extra.stpl' secret='eca4906'}",           '/eca4906/',    'Include #4 - With variable');
-sluz_test("{include file=\"\$inc_file\"}",                              '/e1ab49cf/',   'Include #5 - With variable file path');
-sluz_test("{include file='tpls/nested_inc.stpl'}",                     '/e1ab49cf/',   'Include #6 - Nested include');
-sluz_test("{include file='tpls/var_scope.stpl'}",                      '/SCOPE:15/',   'Include #7 - Variable scope (parent vars visible)');
+sluz_test("{include file='tpls/extra.stpl' secret='eca4906'}", '/eca4906/' , 'Include #4 - With variable');
+sluz_test("{include file=\"\$inc_file\"}"                    , '/e1ab49cf/', 'Include #5 - With variable file path');
+sluz_test("{include file='tpls/nested_inc.stpl'}"            , '/e1ab49cf/', 'Include #6 - Nested include');
+sluz_test("{include file='tpls/var_scope.stpl'}"             , '/SCOPE:15/', 'Include #7 - Variable scope (parent vars visible)');
 
 # -------------------------------------------------------------------
 # Get blocks tests
