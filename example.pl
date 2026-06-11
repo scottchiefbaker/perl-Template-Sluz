@@ -15,9 +15,10 @@ my $s = Template::Sluz->new();
 #print joina(['one', 'two', 'three'], "-");
 #exit;
 
-$s->assign('name', "Jason");
-$s->assign('colors', ['red','green', 'blue']);
-$s->assign('data', { color => 'red', animal => 'kitten', age => 39 });
+$s->assign('name'   , "Jason");
+$s->assign('colors' , ['red','green', 'blue']);
+$s->assign('data'   , { color => 'red', animal => 'kitten', age => 39 });
+$s->assign('version', $Template::Sluz::VERSION);
 
 #print $s->parse_string('Hello {$name}');
 print $s->fetch(Template::Sluz::SLUZ_INLINE);
@@ -57,11 +58,15 @@ BEGIN {
 }
 
 __DATA__
+Using Template::Sluz {$version}
+
 Hello {$name|uc}
 
 {foreach $colors as $c}
 * {$c}
 {/foreach}
+
+{$colors|join:"/"}
 
 Literal: {literal}{}{/literal}
 
@@ -69,6 +74,4 @@ Hash: {$data.age} = {$data.color} = {$data.bad|default:"Me"}
 
 Array index #1: {$colors.1}
 
-===========================
-{$colors|joina:'|'}
-{$name|substr:0,3}
+Substr: {$name|substr:0,3}
