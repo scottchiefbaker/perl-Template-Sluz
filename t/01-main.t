@@ -52,6 +52,15 @@ $sluz->assign('scores', {math => 95, science => 88, art => 76});
 $sluz->assign('inc_file', 'tpls/extra.stpl');
 $sluz->assign({color => 'yellow', age => 43, book => 'Dark Tower'});
 
+# Assign a raw hash where all the keys live in the root namespace
+my %data = (
+	car     => 'Honda',
+	ltuae   => 42,
+	console => 'Nintendo',
+	milk    => ['goat', 'cow', 'soy'],
+);
+$sluz->assign(%data);
+
 $sluz->{perl_file_dir} = dirname(__FILE__);
 
 # -------------------------------------------------------------------
@@ -159,12 +168,15 @@ sluz_test('{$first|substr:2,2}',                     'ot',                      
     sluz_test('{if !$cust.age}unknown{else}{$age}{/if}', 'unknown',                 'Basic #31 - Negated hash lookup');
 }
 
-sluz_test('{1.1234 + 2.3456}', '3.469', 'Basic #32 - Simple math that returns floating point');
-sluz_test(''                 , ''     , 'Basic #33 - Empty template');
-sluz_test(' '                , ' '    , 'Basic #34 - Whitespace only template');
-sluz_test('{$bogus_var + 3}' , '3'    , 'Basic #35 - Undefined var in numeric expression');
-sluz_test('{!$false}'        , '1'    , 'Basic #36 - Standalone negated expression (false to true)');
-sluz_test('{!$true}'         , ''     , 'Basic #37 - Standalone negated expression (true to false)');
+sluz_test('{1.1234 + 2.3456}', '3.469'       , 'Basic #32 - Simple math that returns floating point');
+sluz_test(''                 , ''            , 'Basic #33 - Empty template');
+sluz_test(' '                , ' '           , 'Basic #34 - Whitespace only template');
+sluz_test('{$bogus_var + 3}' , '3'           , 'Basic #35 - Undefined var in numeric expression');
+sluz_test('{!$false}'        , '1'           , 'Basic #36 - Standalone negated expression (false to true)');
+sluz_test('{!$true}'         , ''            , 'Basic #37 - Standalone negated expression (true to false)');
+sluz_test('{$car}'           , 'Honda'       , 'Basic #38 - String variable set from hash');
+sluz_test('{$ltuae}'         , '42'          , 'Basic #39 - Integer variable set from hash');
+sluz_test('{$milk|join:":"}' , 'goat:cow:soy', 'Basic #40 - Array set from hash');
 
 # -------------------------------------------------------------------
 # Custom/User functions
