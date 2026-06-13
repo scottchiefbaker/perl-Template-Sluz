@@ -5,7 +5,7 @@ use 5.016;
 
 use lib qw(lib);
 use Template::Sluz;
-use Time::HiRes qw(gettimeofday tv_interval);
+use Time::HiRes;
 use Getopt::Long qw(GetOptions);
 
 my $ITERATIONS = 5000;
@@ -31,7 +31,7 @@ $sluz->assign(%vars);
 
 # Print header
 my $line = "-" x 61;
-printf "%-30s %8s %10s %10s\n", "Benchmark", "Iters", "Time(s)", "Per sec";
+printf "%-30s %8s %10s %10s\n", "Benchmark", "Iters", "Millis", "Iter /s";
 print "$line\n";
 
 my $total_time = 0;
@@ -47,20 +47,26 @@ for my $name (sort keys %templates) {
     # Warmup
     $sluz->parse_string($tpl) for 1..10;
 
-    my $start = [gettimeofday];
+    my $start = millis();
     for (1..$ITERATIONS) {
         $sluz->parse_string($tpl);
     }
-    my $elapsed = tv_interval($start);
+    my $elapsed = millis() - $start;
     $total_time += $elapsed;
 
-    my $per_sec = $elapsed > 0 ? $ITERATIONS / $elapsed : 0;
-    printf "%-30s %8d %10.3f %10.1f\n", $desc, $ITERATIONS, $elapsed, $per_sec;
+    my $per_sec;
+    if ($elapsed > 0) {
+        $per_sec = ($ITERATIONS * 1000) / $elapsed;
+    } else {
+        $per_sec = 0;
+    }
+
+    printf "%-30s %8d %10d %10.1f\n", $desc, $ITERATIONS, $elapsed, $per_sec;
     $results{$name} = { elapsed => $elapsed, per_sec => $per_sec };
 }
 
 print "$line\n";
-printf "%-30s %8s %10.3f\n", "TOTAL", "", $total_time;
+printf "%-30s %8s %10d\n", "TOTAL", "", $total_time;
 
 ################################################################################
 
