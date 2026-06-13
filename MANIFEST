@@ -13,3 +13,7 @@ tpls/child.stpl
 tpls/extra.stpl
 tpls/parent.stpl
 example.pl
+bench.pl
+release-notes.md
+t/tpls/var_scope.stpl
+t/tpls/nested_inc.stpl
