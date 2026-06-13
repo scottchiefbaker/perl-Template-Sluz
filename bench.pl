@@ -6,8 +6,19 @@ use 5.016;
 use lib qw(lib);
 use Template::Sluz;
 use Time::HiRes qw(gettimeofday tv_interval);
+use Getopt::Long qw(GetOptions);
 
-my $ITERATIONS = $ARGV[0] || 5000;
+my $ITERATIONS = 5000;
+my $filter;
+
+GetOptions(
+    "filter=s" => \$filter,
+    "n=i"      => \$ITERATIONS,
+) or die "Usage: $0 [--filter REGEX] [-n ITERATIONS]\n";
+
+if (@ARGV && !$filter) {
+    $ITERATIONS = $ARGV[0];
+}
 
 my $s = Template::Sluz->new();
 $s->assign(
@@ -140,6 +151,8 @@ for my $name (sort keys %templates) {
     my $t = $templates{$name};
     my $tpl = $t->{tpl};
     my $desc = $t->{desc};
+
+    if ($filter && $name !~ /$filter/i && $desc !~ /$filter/i) { next; }
 
     # Warmup
     $s->parse_string($tpl) for 1..10;
