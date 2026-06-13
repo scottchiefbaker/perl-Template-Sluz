@@ -70,6 +70,7 @@ sub new {
         perl_file_dir => undef,
         fetch_called  => 0,
         char_pos      => -1,
+        _sub_cache    => {},
     };
 
     bless $self, $class;
@@ -866,7 +867,27 @@ sub _peval {
         $__S->{"$self->{var_prefix}_$k"} = $v;
     }
 
+    # Check compiled sub cache — avoids re-parsing the same expression
+    my $sub = $self->{_sub_cache}{$str};
+    if (!defined $sub) {
+        # Compile in main:: first (where user functions live), then Template::Sluz
+        $sub = eval "package main; sub { my \$__S = \$_[0]; return ($str); }";
+        if ($@) {
+            $sub = eval "sub { my \$__S = \$_[0]; return ($str); }";
+        }
+        # Cache the result (even undef) so we don't recompile failures
+        $self->{_sub_cache}{$str} = $sub;
+    }
+
     my $ret;
+    if ($sub) {
+        local $SIG{__WARN__} = sub {};
+        $ret = eval { $sub->($__S) };
+        unless ($@) { return ($ret, 0) }
+        # Cached sub failed (e.g. function not in main::) — evict and fall through
+        delete $self->{_sub_cache}{$str};
+    }
+
     {
         local $SIG{__WARN__} = sub {};
         $ret = eval "return ($str);";
