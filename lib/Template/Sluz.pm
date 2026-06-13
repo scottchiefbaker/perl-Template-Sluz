@@ -654,20 +654,22 @@ sub _foreach_block {
     my $ret  = '';
     my $idx  = 0;
 
+    my $need_first = index($payload, '__FOREACH_FIRST') >= 0;
+    my $need_last  = index($payload, '__FOREACH_LAST')  >= 0;
+    my $need_index = index($payload, '__FOREACH_INDEX') >= 0;
+
     if (ref $src eq 'ARRAY') {
         my $last = $#$src;
         for my $i (0 .. $last) {
-            if ($idx == 0) {
-                $self->{tpl_vars}{__FOREACH_FIRST} = 1;
-            } else {
-                $self->{tpl_vars}{__FOREACH_FIRST} = 0;
+            if ($need_first) {
+                $self->{tpl_vars}{__FOREACH_FIRST} = ($idx == 0) ? 1 : 0;
             }
-            if ($idx == $last) {
-                $self->{tpl_vars}{__FOREACH_LAST} = 1;
-            } else {
-                $self->{tpl_vars}{__FOREACH_LAST} = 0;
+            if ($need_last) {
+                $self->{tpl_vars}{__FOREACH_LAST} = ($idx == $last) ? 1 : 0;
             }
-            $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
+            if ($need_index) {
+                $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
+            }
             if (defined $oval) {
                 $self->{tpl_vars}{$okey} = $i;
                 $self->{tpl_vars}{$oval} = $src->[$i];
@@ -682,17 +684,15 @@ sub _foreach_block {
         my $last = $#keys;
         for my $i (0 .. $last) {
             my $k = $keys[$i];
-            if ($idx == 0) {
-                $self->{tpl_vars}{__FOREACH_FIRST} = 1;
-            } else {
-                $self->{tpl_vars}{__FOREACH_FIRST} = 0;
+            if ($need_first) {
+                $self->{tpl_vars}{__FOREACH_FIRST} = ($idx == 0) ? 1 : 0;
             }
-            if ($idx == $last) {
-                $self->{tpl_vars}{__FOREACH_LAST} = 1;
-            } else {
-                $self->{tpl_vars}{__FOREACH_LAST} = 0;
+            if ($need_last) {
+                $self->{tpl_vars}{__FOREACH_LAST} = ($idx == $last) ? 1 : 0;
             }
-            $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
+            if ($need_index) {
+                $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
+            }
             if (defined $oval) {
                 $self->{tpl_vars}{$okey} = $k;
                 $self->{tpl_vars}{$oval} = $src->{$k};
