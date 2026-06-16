@@ -20,7 +20,7 @@ use warnings;
 use 5.016;
 
 use File::Basename qw(dirname basename);
-use Carp qw(croak);
+use autouse 'Carp' => qw(croak);
 
 use constant SLUZ_INLINE => 'INLINE_TEMPLATE';
 
