@@ -668,8 +668,8 @@ sub _foreach_block {
     my $payload  = shift;
 
     my $conv_src = $self->_convert_vars($src_expr);
-    $payload = $self->ltrim_one($payload, "\n");
-    my @blocks = $self->_get_blocks($payload);
+    $payload     = $self->ltrim_one($payload, "\n");
+    my @blocks   = $self->_get_blocks($payload);
 
     my ($src) = $self->_peval($conv_src);
 
