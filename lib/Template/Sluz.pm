@@ -59,19 +59,20 @@ sub join {
 sub new {
     my $class = shift;
     my $self  = {
-        version       => $VERSION,
-        tpl_file      => undef,
-        inc_tpl_file  => undef,
-        debug         => 0,
-        tpl_vars      => {},
-        parent_tpl    => undef,
-        var_prefix    => 'sluz_pfx',
-        perl_file     => undef,
-        perl_file_dir => undef,
-        fetch_called  => 0,
-        char_pos      => -1,
-        _sub_cache    => {},
-        __S           => {},   # Cached prefixed var hash used by _peval
+        version        => $VERSION,
+        tpl_file       => undef,
+        inc_tpl_file   => undef,
+        debug          => 0,
+        tpl_vars       => {},
+        parent_tpl     => undef,
+        var_prefix     => 'sluz_pfx',
+        perl_file      => undef,
+        perl_file_dir  => undef,
+        fetch_called   => 0,
+        char_pos       => -1,
+        _sub_cache     => {},
+        __S            => {}, # Cached prefixed var hash used by _peval
+        _convert_cache => {}, # Cached _convert_vars results (avoids re-running regex on repeated expressions)
     };
 
     bless $self, $class;
@@ -821,12 +822,23 @@ sub _convert_vars {
     my $str  = shift // '';
     if (index($str, '$') < 0) { return $str }
 
+    # Check conversion cache — avoids re-running regex substitutions on
+    # the same expression (e.g. an {if} condition inside a {foreach} loop)
+    if (exists $self->{_convert_cache}{$str}) {
+        return $self->{_convert_cache}{$str};
+    }
+
+    my $orig = $str;
+
     # Step 1: $var.key -> $__S->{sluz_pfx_var}->{key}
     $str =~ s/(\$\w[\w\.]*)/ $self->_dot_to_bracket_cb($1) /ge;
 
     # Step 2: $__S->{...}["key"] -> $__S->{...}->{key} (PHP bracket syntax)
-    $str =~ s/(\$__S(?:->\{[^}]+\})+)\[(["'])([^\]]+?)\2\]/$1 . '->{' . $3 . '}'/ge;
+    if (index($str, '[') >= 0) {
+        $str =~ s/(\$__S(?:->\{[^}]+\})+)\[(["'])([^\]]+?)\2\]/$1 . '->{' . $3 . '}'/ge;
+    }
 
+    $self->{_convert_cache}{$orig} = $str;
     return $str;
 }
 
