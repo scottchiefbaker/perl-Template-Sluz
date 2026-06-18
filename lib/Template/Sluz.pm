@@ -71,6 +71,7 @@ sub new {
         fetch_called  => 0,
         char_pos      => -1,
         _sub_cache    => {},
+        __S           => {},   # Cached prefixed var hash used by _peval
     };
 
     bless $self, $class;
@@ -80,15 +81,23 @@ sub new {
 sub assign {
     my $self = shift;
 
+    my $pfx = $self->{var_prefix};
+
     # Accept either a hashref: assign($hash_ref)
     if (@_ == 1 && ref $_[0] eq 'HASH') {
         my $h = shift;
         @{$self->{tpl_vars}}{keys %$h} = values %$h;
+        for my $k (keys %$h) {
+            $self->{__S}{"${pfx}_$k"} = $h->{$k};
+        }
 
     # Or a key-value list: assign(name => 'Scott', age => 42)
     } elsif (@_ % 2 == 0) {
         my %h = @_;
         @{$self->{tpl_vars}}{keys %h} = values %h;
+        for my $k (keys %h) {
+            $self->{__S}{"${pfx}_$k"} = $h{$k};
+        }
     } else {
         $self->_error_out("Invalid assign. Must be a key/value or hash", 18956);
 	}
@@ -650,7 +659,17 @@ sub _foreach_block {
         $src = [$src];
     }
 
-    my %save = %{$self->{tpl_vars}};
+    my %save_tpl = %{$self->{tpl_vars}};
+    my %save_ks  = %{$self->{__S}};
+    my $pfx      = $self->{var_prefix};
+
+    # Precompute __S keys for the loop variables
+    my $okey_ks   = "${pfx}_$okey";
+    my $oval_ks   = defined $oval ? "${pfx}_$oval" : undef;
+    my $first_ks  = "${pfx}__FOREACH_FIRST";
+    my $last_ks   = "${pfx}__FOREACH_LAST";
+    my $index_ks  = "${pfx}__FOREACH_INDEX";
+
     my $ret  = '';
     my $idx  = 0;
 
@@ -663,18 +682,24 @@ sub _foreach_block {
         for my $i (0 .. $last) {
             if ($need_first) {
                 $self->{tpl_vars}{__FOREACH_FIRST} = ($idx == 0) ? 1 : 0;
+                $self->{__S}{$first_ks} = ($idx == 0) ? 1 : 0;
             }
             if ($need_last) {
                 $self->{tpl_vars}{__FOREACH_LAST} = ($idx == $last) ? 1 : 0;
+                $self->{__S}{$last_ks} = ($idx == $last) ? 1 : 0;
             }
             if ($need_index) {
                 $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
+                $self->{__S}{$index_ks} = $idx;
             }
             if (defined $oval) {
                 $self->{tpl_vars}{$okey} = $i;
                 $self->{tpl_vars}{$oval} = $src->[$i];
+                $self->{__S}{$okey_ks} = $i;
+                $self->{__S}{$oval_ks} = $src->[$i];
             } else {
                 $self->{tpl_vars}{$okey} = $src->[$i];
+                $self->{__S}{$okey_ks} = $src->[$i];
             }
             $ret .= $self->_process_blocks(\@blocks);
             $idx++;
@@ -686,25 +711,32 @@ sub _foreach_block {
             my $k = $keys[$i];
             if ($need_first) {
                 $self->{tpl_vars}{__FOREACH_FIRST} = ($idx == 0) ? 1 : 0;
+                $self->{__S}{$first_ks} = ($idx == 0) ? 1 : 0;
             }
             if ($need_last) {
                 $self->{tpl_vars}{__FOREACH_LAST} = ($idx == $last) ? 1 : 0;
+                $self->{__S}{$last_ks} = ($idx == $last) ? 1 : 0;
             }
             if ($need_index) {
                 $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
+                $self->{__S}{$index_ks} = $idx;
             }
             if (defined $oval) {
                 $self->{tpl_vars}{$okey} = $k;
                 $self->{tpl_vars}{$oval} = $src->{$k};
+                $self->{__S}{$okey_ks} = $k;
+                $self->{__S}{$oval_ks} = $src->{$k};
             } else {
                 $self->{tpl_vars}{$okey} = $src->{$k};
+                $self->{__S}{$okey_ks} = $src->{$k};
             }
             $ret .= $self->_process_blocks(\@blocks);
             $idx++;
         }
     }
 
-    $self->{tpl_vars} = \%save;
+    $self->{tpl_vars} = \%save_tpl;
+    $self->{__S}      = \%save_ks;
     return $ret;
 }
 
@@ -862,10 +894,9 @@ sub _peval {
     my $opt = $self->_micro_optimize($str);
     if (defined $opt) { return ($opt, 0) }
 
-    my $__S = {};
-    while (my ($k, $v) = each %{$self->{tpl_vars}}) {
-        $__S->{"$self->{var_prefix}_$k"} = $v;
-    }
+    # Use the persistent $__S hash (maintained by assign/foreach) instead
+    # of rebuilding it from tpl_vars on every call
+    my $__S = $self->{__S};
 
     # Check compiled sub cache — avoids re-parsing the same expression
     my $sub = $self->{_sub_cache}{$str};
