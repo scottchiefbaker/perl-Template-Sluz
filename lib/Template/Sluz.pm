@@ -73,6 +73,7 @@ sub new {
         _sub_cache     => {},
         __S            => {}, # Cached prefixed var hash used by _peval
         _convert_cache => {}, # Cached _convert_vars results (avoids re-running regex on repeated expressions)
+        _blocks_cache  => {}, # Cached _get_blocks results (avoids re-tokenizing if payloads in loops)
     };
 
     bless $self, $class;
@@ -341,6 +342,13 @@ sub _get_inline_content {
 sub _get_blocks {
     my $self = shift;
     my $str  = shift // '';
+
+    # Check blocks cache — avoids re-tokenizing the same payload string
+    # (e.g. an {if} payload re-parsed on every iteration of a {foreach} loop)
+    if (exists $self->{_blocks_cache}{$str}) {
+        return @{$self->{_blocks_cache}{$str}};
+    }
+
     my $slen = length $str;
     my $start = 0;
     my $i;
@@ -453,6 +461,7 @@ sub _get_blocks {
         $prev_is_if = $cur_is_if;
     }
 
+    $self->{_blocks_cache}{$str} = \@blocks;
     return @blocks;
 }
 
