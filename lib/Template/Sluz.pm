@@ -901,7 +901,9 @@ sub _peval {
     my $self = shift;
     my $str  = shift // '';
 
-    $str =~ s/===/==/g;
+    if (index($str, '===') >= 0) {
+        $str =~ s/===/==/g;
+    }
 
     my $opt = $self->_micro_optimize($str);
     if (defined $opt) { return ($opt, 0) }
