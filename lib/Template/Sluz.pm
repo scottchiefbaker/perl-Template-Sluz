@@ -539,6 +539,16 @@ sub _variable_block {
     my $self = shift;
     my $str  = shift;
 
+    # Fast path: no pipe means no modifier, just resolve the variable.
+    # Avoids running the pipe-split regex on every plain variable block.
+    if (index($str, '|') < 0) {
+        my $ret = $self->array_dive($str, $self->{tpl_vars});
+        if (ref $ret eq 'ARRAY') { return 'ARRAY' }
+        if (ref $ret eq 'HASH')  { return 'HASH' }
+        if (defined $ret) { return $ret }
+        return '';
+    }
+
     if ($str =~ /(.+?)\|(.*)/) {
         my $key = $1;
         my $mod = $2;
