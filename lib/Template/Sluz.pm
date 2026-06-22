@@ -59,22 +59,22 @@ sub join {
 sub new {
     my $class = shift;
     my $self  = {
-        version        => $VERSION,
-        tpl_file       => undef,
-        inc_tpl_file   => undef,
-        debug          => 0,
-        tpl_vars       => {},
-        parent_tpl     => undef,
-        var_prefix     => 'sluz_pfx',
-        perl_file      => undef,
-        perl_file_dir  => undef,
-        fetch_called   => 0,
-        char_pos       => -1,
-        _sub_cache     => {},
-        __S            => {}, # Cached prefixed var hash used by _peval
-        _convert_cache => {}, # Cached _convert_vars results (avoids re-running regex on repeated expressions)
-        _blocks_cache  => {}, # Cached _get_blocks results (avoids re-tokenizing if payloads in loops)
-        _if_rules_cache => {}, # Cached parsed {if} rules (avoids re-parsing same if block in loops)
+        version             => $VERSION,
+        tpl_file            => undef,
+        inc_tpl_file        => undef,
+        debug               => 0,
+        tpl_vars            => {},
+        parent_tpl          => undef,
+        var_prefix          => 'sluz_pfx',
+        perl_file           => undef,
+        perl_file_dir       => undef,
+        fetch_called        => 0,
+        char_pos            => -1,
+        _sub_cache          => {},
+        __S                 => {}, # Cached prefixed var hash used by _peval
+        _convert_cache      => {}, # Cached _convert_vars results (avoids re-running regex on repeated expressions)
+        _blocks_cache       => {}, # Cached _get_blocks results (avoids re-tokenizing if payloads in loops)
+        _if_rules_cache     => {}, # Cached parsed {if} rules (avoids re-parsing same if block in loops)
         _verified_sub_cache => {}, # Cached subs that succeeded once — skip eval/SIG overhead
     };
 
@@ -713,11 +713,16 @@ sub _if_block {
 
     my $ret = '';
     for my $rule (@rules) {
-        my $test    = $self->_convert_vars($rule->[0]);
+        my $raw = $rule->[0];
+        # Inline _convert_vars for cached expressions — saves method call per iteration
+        my $test = (index($raw, '$') < 0) ? $raw :
+                   ($self->{_convert_cache}{$raw} // $self->_convert_vars($raw));
         my $payload = $rule->[1];
         my ($res) = $self->_peval($test);
         if ($res) {
-            my @in_blocks = $self->_get_blocks($payload);
+            # Inline _get_blocks for cached payloads
+            my $cached = $self->{_blocks_cache}{$payload};
+            my @in_blocks = $cached ? @$cached : $self->_get_blocks($payload);
             $ret .= $self->_process_blocks(\@in_blocks);
             last;
         }
