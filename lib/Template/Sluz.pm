@@ -470,17 +470,69 @@ sub _get_blocks {
 sub _process_blocks {
     my $self   = shift;
     my $blocks = shift;
-    my $html   = '';
+    my $out    = shift;  # Optional: ref to append output to (avoids temp string + concat)
 
+    if ($out) {
+        for my $x (@$blocks) {
+            my $block = $x->[0];
+            next unless length $block;
+            my $first = substr($block, 0, 1);
+            if ($first ne '{') {
+                $$out .= $block;
+                next;
+            }
+            # Fast path: {$var} or {$var.dot} with no modifier — inline
+            # variable resolution, skip _process_block AND _variable_block
+            if (substr($block, 0, 2) eq '{$' && index($block, '|') < 0
+                && $block =~ /^\{\$(\w[\w.]*)\}$/) {
+                my $var = $1;
+                my $val;
+                if (index($var, '.') < 0) {
+                    $val = $self->{tpl_vars}{$var};
+                } else {
+                    $val = $self->array_dive($var, $self->{tpl_vars});
+                }
+                if (ref $val eq 'ARRAY')  { $$out .= 'ARRAY' }
+                elsif (ref $val eq 'HASH') { $$out .= 'HASH' }
+                elsif (defined $val)       { $$out .= $val }
+                next;
+            }
+            $$out .= $self->_process_block($block, $x->[1]);
+        }
+        return;
+    }
+
+    my $html = '';
     for my $x (@$blocks) {
         my $block = $x->[0];
-        if (!length $block) { next }
-        if (substr($block, 0, 1) eq '{') {
-            my $char_pos = $x->[1];
-            $html .= $self->_process_block($block, $char_pos);
-        } else {
+        next unless length $block;
+        my $first = substr($block, 0, 1);
+        if ($first ne '{') {
             $html .= $block;
+            next;
         }
+        # Fast path: {$var} or {$var.dot} with no modifier
+        if (substr($block, 0, 2) eq '{$' && index($block, '|') < 0
+            && $block =~ /^\{\$(\w[\w.]*)\}$/) {
+            my $var = $1;
+            my $val;
+            if (index($var, '.') < 0) {
+                $val = $self->{tpl_vars}{$var};
+            } else {
+                $val = $self->array_dive($var, $self->{tpl_vars});
+            }
+            if (ref $val eq 'ARRAY')  { $html .= 'ARRAY' }
+            elsif (ref $val eq 'HASH') { $html .= 'HASH' }
+            elsif (defined $val)       { $html .= $val }
+            next;
+        }
+        # If block fast path — skip _process_block dispatch
+        if (substr($block, 0, 4) eq '{if ' && substr($block, -5) eq '{/if}') {
+            $self->{char_pos} = $x->[1];
+            $html .= $self->_if_block($block);
+            next;
+        }
+        $html .= $self->_process_block($block, $x->[1]);
     }
 
     return $html;
