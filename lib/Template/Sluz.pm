@@ -543,7 +543,13 @@ sub _variable_block {
     # Fast path: no pipe means no modifier, just resolve the variable.
     # Avoids running the pipe-split regex on every plain variable block.
     if (index($str, '|') < 0) {
-        my $ret = $self->array_dive($str, $self->{tpl_vars});
+        my $ret;
+        # Inline simple key lookup (no dots) — skips array_dive method call
+        if (index($str, '.') < 0) {
+            $ret = $self->{tpl_vars}{$str};
+        } else {
+            $ret = $self->array_dive($str, $self->{tpl_vars});
+        }
         if (ref $ret eq 'ARRAY') { return 'ARRAY' }
         if (ref $ret eq 'HASH')  { return 'HASH' }
         if (defined $ret) { return $ret }
