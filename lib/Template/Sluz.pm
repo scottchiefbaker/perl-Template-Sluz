@@ -805,7 +805,32 @@ sub _foreach_block {
                 $self->{tpl_vars}{$okey} = $src->[$i];
                 $self->{__S}{$okey_ks} = $src->[$i];
             }
-            $ret .= $self->_process_blocks(\@blocks);
+            # Inline _process_blocks to avoid method call per iteration
+            for my $b (@blocks) {
+                my $bs = $b->[0];
+                next unless length $bs;
+                my $first = substr($bs, 0, 1);
+                if ($first ne '{') {
+                    $ret .= $bs;
+                } elsif (substr($bs, 0, 2) eq '{$' && index($bs, '|') < 0
+                         && $bs =~ /^\{\$(\w[\w.]*)\}$/) {
+                    my $var = $1;
+                    my $val;
+                    if (index($var, '.') < 0) {
+                        $val = $self->{tpl_vars}{$var};
+                    } else {
+                        $val = $self->array_dive($var, $self->{tpl_vars});
+                    }
+                    if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
+                    elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
+                    elsif (defined $val)       { $ret .= $val }
+                } elsif (substr($bs, 0, 4) eq '{if ' && substr($bs, -5) eq '{/if}') {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_if_block($bs);
+                } else {
+                    $ret .= $self->_process_block($bs, $b->[1]);
+                }
+            }
             $idx++;
         }
     } elsif (ref $src eq 'HASH') {
@@ -834,7 +859,32 @@ sub _foreach_block {
                 $self->{tpl_vars}{$okey} = $src->{$k};
                 $self->{__S}{$okey_ks} = $src->{$k};
             }
-            $ret .= $self->_process_blocks(\@blocks);
+            # Inline _process_blocks to avoid method call per iteration
+            for my $b (@blocks) {
+                my $bs = $b->[0];
+                next unless length $bs;
+                my $first = substr($bs, 0, 1);
+                if ($first ne '{') {
+                    $ret .= $bs;
+                } elsif (substr($bs, 0, 2) eq '{$' && index($bs, '|') < 0
+                         && $bs =~ /^\{\$(\w[\w.]*)\}$/) {
+                    my $var = $1;
+                    my $val;
+                    if (index($var, '.') < 0) {
+                        $val = $self->{tpl_vars}{$var};
+                    } else {
+                        $val = $self->array_dive($var, $self->{tpl_vars});
+                    }
+                    if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
+                    elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
+                    elsif (defined $val)       { $ret .= $val }
+                } elsif (substr($bs, 0, 4) eq '{if ' && substr($bs, -5) eq '{/if}') {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_if_block($bs);
+                } else {
+                    $ret .= $self->_process_block($bs, $b->[1]);
+                }
+            }
             $idx++;
         }
     }
