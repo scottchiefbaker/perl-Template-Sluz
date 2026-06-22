@@ -679,8 +679,6 @@ sub _foreach_block {
         $src = [$src];
     }
 
-    my %save_tpl = %{$self->{tpl_vars}};
-    my %save_ks  = %{$self->{__S}};
     my $pfx      = $self->{var_prefix};
 
     # Precompute __S keys for the loop variables
@@ -696,6 +694,26 @@ sub _foreach_block {
     my $need_first = index($payload, '__FOREACH_FIRST') >= 0;
     my $need_last  = index($payload, '__FOREACH_LAST')  >= 0;
     my $need_index = index($payload, '__FOREACH_INDEX') >= 0;
+
+    # Save only the keys we'll modify — O(k) where k <= 5, vs O(n) for
+    # copying the entire tpl_vars/__S hashes. Big win for nested foreach.
+    my @tpl_keys = ($okey);
+    my @ks_keys  = ($okey_ks);
+    if (defined $oval) {
+        push @tpl_keys, $oval;
+        push @ks_keys,  $oval_ks;
+    }
+    push @tpl_keys, '__FOREACH_FIRST' if $need_first;
+    push @ks_keys,  $first_ks         if $need_first;
+    push @tpl_keys, '__FOREACH_LAST'  if $need_last;
+    push @ks_keys,  $last_ks          if $need_last;
+    push @tpl_keys, '__FOREACH_INDEX' if $need_index;
+    push @ks_keys,  $index_ks         if $need_index;
+
+    my @tpl_exists = map { exists $self->{tpl_vars}{$_} } @tpl_keys;
+    my @tpl_vals   = map { $self->{tpl_vars}{$_} } @tpl_keys;
+    my @ks_exists  = map { exists $self->{__S}{$_} } @ks_keys;
+    my @ks_vals    = map { $self->{__S}{$_} } @ks_keys;
 
     if (ref $src eq 'ARRAY') {
         my $last = $#$src;
@@ -755,8 +773,20 @@ sub _foreach_block {
         }
     }
 
-    $self->{tpl_vars} = \%save_tpl;
-    $self->{__S}      = \%save_ks;
+    # Restore only the keys we modified
+    for my $i (0 .. $#tpl_keys) {
+        if ($tpl_exists[$i]) {
+            $self->{tpl_vars}{$tpl_keys[$i]} = $tpl_vals[$i];
+        } else {
+            delete $self->{tpl_vars}{$tpl_keys[$i]};
+        }
+        if ($ks_exists[$i]) {
+            $self->{__S}{$ks_keys[$i]} = $ks_vals[$i];
+        } else {
+            delete $self->{__S}{$ks_keys[$i]};
+        }
+    }
+
     return $ret;
 }
 
