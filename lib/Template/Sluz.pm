@@ -75,6 +75,7 @@ sub new {
         _convert_cache => {}, # Cached _convert_vars results (avoids re-running regex on repeated expressions)
         _blocks_cache  => {}, # Cached _get_blocks results (avoids re-tokenizing if payloads in loops)
         _if_rules_cache => {}, # Cached parsed {if} rules (avoids re-parsing same if block in loops)
+        _verified_sub_cache => {}, # Cached subs that succeeded once — skip eval/SIG overhead
     };
 
     bless $self, $class;
@@ -974,13 +975,21 @@ sub _peval {
     # of rebuilding it from tpl_vars on every call
     my $__S = $self->{__S};
 
+    # Check verified sub cache — subs that have succeeded at least once.
+    # Skip eval/local $SIG overhead (the biggest per-call cost in loops).
+    # no warnings in the compiled sub suppresses uninitialized-value warnings.
+    my $vsub = $self->{_verified_sub_cache}{$str};
+    if ($vsub) {
+        return ($vsub->($__S), 0);
+    }
+
     # Check compiled sub cache — avoids re-parsing the same expression
     my $sub = $self->{_sub_cache}{$str};
     if (!defined $sub) {
         # Compile in main:: first (where user functions live), then Template::Sluz
-        $sub = eval "package main; sub { my \$__S = \$_[0]; return ($str); }";
+        $sub = eval "package main; no warnings; sub { my \$__S = \$_[0]; return ($str); }";
         if ($@) {
-            $sub = eval "sub { my \$__S = \$_[0]; return ($str); }";
+            $sub = eval "no warnings; sub { my \$__S = \$_[0]; return ($str); }";
         }
         # Cache the result (even undef) so we don't recompile failures
         $self->{_sub_cache}{$str} = $sub;
@@ -990,16 +999,21 @@ sub _peval {
     if ($sub) {
         local $SIG{__WARN__} = sub {};
         $ret = eval { $sub->($__S) };
-        unless ($@) { return ($ret, 0) }
+        unless ($@) {
+            # Promote to verified cache — skip eval/SIG on future calls
+            $self->{_verified_sub_cache}{$str} = $sub;
+            delete $self->{_sub_cache}{$str};
+            return ($ret, 0);
+        }
         # Cached sub failed (e.g. function not in main::) — evict and fall through
         delete $self->{_sub_cache}{$str};
     }
 
     {
         local $SIG{__WARN__} = sub {};
-        $ret = eval "return ($str);";
+        $ret = eval "no warnings; return ($str);";
         if ($@) {
-            $ret = eval "package main; return ($str);";
+            $ret = eval "package main; no warnings; return ($str);";
         }
     }
 
