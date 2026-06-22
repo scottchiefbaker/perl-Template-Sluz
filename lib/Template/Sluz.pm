@@ -74,6 +74,7 @@ sub new {
         __S            => {}, # Cached prefixed var hash used by _peval
         _convert_cache => {}, # Cached _convert_vars results (avoids re-running regex on repeated expressions)
         _blocks_cache  => {}, # Cached _get_blocks results (avoids re-tokenizing if payloads in loops)
+        _if_rules_cache => {}, # Cached parsed {if} rules (avoids re-parsing same if block in loops)
     };
 
     bless $self, $class;
@@ -631,18 +632,24 @@ sub _if_block {
     my $self = shift;
     my $str  = shift;
 
-    my $is_simple = index($str, '{else', 7) < 0;
     my @rules;
-
-    if ($is_simple) {
-        $str =~ /\{if (.+?)}(.+)\{\/if\}/s;
-        my $cond    = $1 // '';
-        my $payload = $2 // '';
-        $payload = $self->ltrim_one($payload, "\n");
-        @rules = ([$cond, $payload]);
+    if (exists $self->{_if_rules_cache}{$str}) {
+        @rules = @{$self->{_if_rules_cache}{$str}};
     } else {
-        my @toks = $self->get_tokens($str);
-        @rules   = $self->_if_rules_from_tokens(\@toks);
+        my $is_simple = index($str, '{else', 7) < 0;
+
+        if ($is_simple) {
+            $str =~ /\{if (.+?)}(.+)\{\/if\}/s;
+            my $cond    = $1 // '';
+            my $payload = $2 // '';
+            $payload = $self->ltrim_one($payload, "\n");
+            @rules = ([$cond, $payload]);
+        } else {
+            my @toks = $self->get_tokens($str);
+            @rules   = $self->_if_rules_from_tokens(\@toks);
+        }
+
+        $self->{_if_rules_cache}{$str} = \@rules;
     }
 
     my $ret = '';
