@@ -737,6 +737,26 @@ sub _foreach_block {
     $payload     = $self->ltrim_one($payload, "\n");
     my @blocks   = $self->_get_blocks($payload);
 
+    # Pre-classify blocks for fast dispatch in the loop (cached in block arrays)
+    # type: -1=empty, 0=text, 1=simple_var, 2=if_block, 99=other
+    for my $b (@blocks) {
+        next if defined $b->[2];
+        my $bs = $b->[0];
+        if (!length $bs) {
+            $b->[2] = -1;
+        } elsif (substr($bs, 0, 1) ne '{') {
+            $b->[2] = 0;
+        } elsif (substr($bs, 0, 2) eq '{$' && index($bs, '|') < 0
+                 && $bs =~ /^\{\$(\w[\w.]*)\}$/) {
+            $b->[2] = 1;
+            $b->[3] = $1;
+        } elsif (substr($bs, 0, 4) eq '{if ' && substr($bs, -5) eq '{/if}') {
+            $b->[2] = 2;
+        } else {
+            $b->[2] = 99;
+        }
+    }
+
     my ($src) = $self->_peval($conv_src);
 
     if (!defined $src) {
@@ -805,16 +825,13 @@ sub _foreach_block {
                 $self->{tpl_vars}{$okey} = $src->[$i];
                 $self->{__S}{$okey_ks} = $src->[$i];
             }
-            # Inline _process_blocks to avoid method call per iteration
+            # Inline block processing with pre-classified types — no substr/regex per iteration
             for my $b (@blocks) {
-                my $bs = $b->[0];
-                next unless length $bs;
-                my $first = substr($bs, 0, 1);
-                if ($first ne '{') {
-                    $ret .= $bs;
-                } elsif (substr($bs, 0, 2) eq '{$' && index($bs, '|') < 0
-                         && $bs =~ /^\{\$(\w[\w.]*)\}$/) {
-                    my $var = $1;
+                my $type = $b->[2];
+                if ($type == 0) {
+                    $ret .= $b->[0];
+                } elsif ($type == 1) {
+                    my $var = $b->[3];
                     my $val;
                     if (index($var, '.') < 0) {
                         $val = $self->{tpl_vars}{$var};
@@ -824,11 +841,13 @@ sub _foreach_block {
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
                     elsif (defined $val)       { $ret .= $val }
-                } elsif (substr($bs, 0, 4) eq '{if ' && substr($bs, -5) eq '{/if}') {
+                } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
-                    $ret .= $self->_if_block($bs);
+                    $ret .= $self->_if_block($b->[0]);
+                } elsif ($type == -1) {
+                    next;
                 } else {
-                    $ret .= $self->_process_block($bs, $b->[1]);
+                    $ret .= $self->_process_block($b->[0], $b->[1]);
                 }
             }
             $idx++;
@@ -859,16 +878,13 @@ sub _foreach_block {
                 $self->{tpl_vars}{$okey} = $src->{$k};
                 $self->{__S}{$okey_ks} = $src->{$k};
             }
-            # Inline _process_blocks to avoid method call per iteration
+            # Inline block processing with pre-classified types — no substr/regex per iteration
             for my $b (@blocks) {
-                my $bs = $b->[0];
-                next unless length $bs;
-                my $first = substr($bs, 0, 1);
-                if ($first ne '{') {
-                    $ret .= $bs;
-                } elsif (substr($bs, 0, 2) eq '{$' && index($bs, '|') < 0
-                         && $bs =~ /^\{\$(\w[\w.]*)\}$/) {
-                    my $var = $1;
+                my $type = $b->[2];
+                if ($type == 0) {
+                    $ret .= $b->[0];
+                } elsif ($type == 1) {
+                    my $var = $b->[3];
                     my $val;
                     if (index($var, '.') < 0) {
                         $val = $self->{tpl_vars}{$var};
@@ -878,11 +894,13 @@ sub _foreach_block {
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
                     elsif (defined $val)       { $ret .= $val }
-                } elsif (substr($bs, 0, 4) eq '{if ' && substr($bs, -5) eq '{/if}') {
+                } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
-                    $ret .= $self->_if_block($bs);
+                    $ret .= $self->_if_block($b->[0]);
+                } elsif ($type == -1) {
+                    next;
                 } else {
-                    $ret .= $self->_process_block($bs, $b->[1]);
+                    $ret .= $self->_process_block($b->[0], $b->[1]);
                 }
             }
             $idx++;
