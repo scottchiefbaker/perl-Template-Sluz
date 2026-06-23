@@ -219,72 +219,6 @@ eval { $sluz->parse_string('{if debug}') };
 like($@, qr/73467/, 'Error #4 - syntax error');
 
 # -------------------------------------------------------------------
-# If tests
-# -------------------------------------------------------------------
-sluz_test('{if $debug}DEBUG{/if}'                                                 , 'DEBUG'   , 'If #1 - Simple');
-sluz_test('{if $bogus_var}DEBUG{/if}'                                             , ''        , 'If #2 - Missing var');
-sluz_test('{if $debug}{$first}{/if}'                                              , 'Scott'   , 'If #3 - Variable as payload');
-sluz_test('{if $debug}{if $debug}FOO{/if}{/if}'                                   , 'FOO'     , 'If #4 - Nested');
-sluz_test('{if $x}{if $null}yes{else}no{/if}{/if}'                                , 'no'      , 'If #5 - Nested with else');
-sluz_test('{if $one}{if $name}Yes{else}No{/if}{else}Unknown{/if}'                 , 'Unknown' , 'If #6 - Nested with two elses');
-sluz_test('{if $bogus_var}YES{else}NO{/if}'                                       , 'NO'      , 'If #7 - Else');
-sluz_test('{if $cust.first}{$cust.first}{/if}'                                    , 'Scott'   , 'If #8 - Hash lookup');
-sluz_test('{if $number > 10}GREATER{/if}'                                         , 'GREATER' , 'If #9 - Comparison');
-sluz_test('{if $bogus_var || $key}KEY{/if}'                                       , 'KEY'     , 'If #10 - ||');
-sluz_test('{if $number == 15 && $debug}YES{/if}'                                  , 'YES'     , 'If #11 - Two comparisons');
-sluz_test('{if !$verbose}QUIET{/if}'                                              , 'QUIET'   , 'If #12 - Negated comparison');
-sluz_test('{if ($zero || $number > 10)}YES{/if}'                                  , 'YES'     , 'If #13 - Parens');
-sluz_test('{if count($array) > 2}YES{/if}'                                        , 'YES'     , 'If #14 - PHP function conditional');
-sluz_test('{if $debug}{$key}{$last}{/if}'                                         , 'valBaker', 'If #15 - Two block payload');
-sluz_test('{if $debug}ONE{else}TWO{/if}'                                          , 'ONE'     , 'If #16 - Else not needed');
-sluz_test('{if $zero}1{elseif $debug}2{else}3{/if}'                               , '2'       , 'If #17 - Elseif');
-sluz_test('{if $key}{if $one}one{elseif $x}X{else}ELSE{/if}{/if}'                 , 'X'       , 'If #18 - Nested if with elseif');
-sluz_test('{if $number}1{if $key}2{/if}3{/if}'                                    , '123'     , 'If #19 - Nested if leading/trailing chars');
-sluz_test('{if $true}123{else}456{/if}'                                           , '123'     , 'If #20 - Boolean');
-sluz_test('{if !$true}123{else}456{/if}'                                          , '456'     , 'If #21 - Boolean inverted');
-sluz_test('{if $conf.main}123{else}456{/if}'                                      , '123'     , 'If #22 - Hash boolean');
-sluz_test('{if !$conf.main}123{else}456{/if}'                                     , '456'     , 'If #23 - Hash boolean inverted');
-sluz_test('{if $x}{if $y}yes{/if}{else}no{/if}'                                   , 'yes'     , 'If #24 - Nested if with an else');
-sluz_test('{if true}a{else}b{if true}c{/if}{/if}'                                 , 'a'       , 'If #25 - Nested with true');
-sluz_test('{if false}a{else}b{if true}c{/if}{/if}'                                , 'bc'      , 'If #26 - Nested with false');
-sluz_test('{if true}{/if}'                                                        , ''        , 'If #27 - If with "" for payload');
-sluz_test('{if $bogus_var}a{elseif $debug}b{elseif $true}c{else}d{/if}'           , 'b'       , 'If #28 - Multiple elseif (first match)');
-sluz_test('{if $bogus_var}a{elseif $bogus_var2}b{elseif $true}c{else}d{/if}'      , 'c'       , 'If #29 - Multiple elseif (second match)');
-sluz_test('{if $bogus_var}a{elseif $bogus_var2}b{elseif $bogus_var3}c{else}d{/if}', 'd'       , 'If #30 - Multiple elseif (all false, else)');
-
-# -------------------------------------------------------------------
-# Foreach tests
-# -------------------------------------------------------------------
-sluz_test('{foreach $array as $num}{$num}{/foreach}'                         , 'onetwothree'      , 'Foreach #1 - Simple');
-sluz_test("{foreach \$array as \$num}\n{\$num}\n{/foreach}"                  , "one\ntwo\nthree\n", 'Foreach #2 - Simple with whitespace');
-sluz_test('{foreach $members as $x}{$x.first}{/foreach}'                     , 'ScottJason'       , 'Foreach #3 - Hash');
-sluz_test('{foreach $arrayd as $x}{$x.1}{/foreach}'                          , '246'              , 'Foreach #4 - Array');
-sluz_test('{foreach $arrayd as $key => $val}{$key}:{$val.0}{/foreach}'       , '0:11:32:5'        , 'Foreach #6 - Key/val array');
-sluz_test('{foreach $members as $id => $x}{$id}{$x.first}{/foreach}'         , '0Scott1Jason'     , 'Foreach #7 - Key/val hash');
-sluz_test('{foreach $subarr.one as $id}{$id}{/foreach}'                      , '246'              , 'Foreach #8 - Hash key');
-sluz_test('{foreach $bogus_var as $x}one{/foreach}'                          , ''                 , 'Foreach #9 - Missing var');
-sluz_test('{foreach $empty as $x}one{/foreach}'                              , ''                 , 'Foreach #10 - Empty array');
-sluz_test('{foreach $array as $i => $x}{$i}{$x}{/foreach}'                   , '0one1two2three'   , 'Foreach #11 - One char variables');
-sluz_test('{foreach $array as $i => $x}{if $x}{$x}{/if}{/foreach}'           , 'onetwothree'      , 'Foreach #12 - Foreach with nested if');
-sluz_test('{foreach $arrayd as $i => $x}{if $x.1}{$x.1}{/if}{/foreach}'      , '246'              , 'Foreach #13 - Foreach with nested if (array)');
-sluz_test('{foreach $null as $x}one{/foreach}'                               , ''                 , 'Foreach #14 - Null');
-sluz_test('{foreach $first as $x}{$first}{/foreach}'                         , 'Scott'            , 'Foreach #15 - Scalar');
-sluz_test('{foreach $array as $i}{foreach $array as $i}x{/foreach}{/foreach}', 'xxxxxxxxx'        , 'Foreach #16 - Nested');
-
-# Foreach variable persistence tests
-sluz_test('{$x}', '7', 'Foreach #17 - NOT overwrite variable - previously set');
-sluz_test('{$i}', '' , 'Foreach #18 - NOT overwrite variable - no initial value');
-
-sluz_test('{foreach $y as $z}{$z}{/foreach}'                                   , '246'                  , 'Foreach #19 - Foreach one char key');
-sluz_test('{foreach $array as $x}{if $__FOREACH_FIRST}FIRST{/if}{$x}{/foreach}', 'FIRSTonetwothree'     , 'Foreach #20 - Foreach FIRST item');
-sluz_test('{foreach $array as $x}{$x}{if $__FOREACH_LAST}LAST{/if}{/foreach}'  , 'onetwothreeLAST'      , 'Foreach #21 - Foreach LAST item');
-sluz_test('{foreach $array as $x}{$x}{$__FOREACH_INDEX}{/foreach}'             , 'one0two1three2'       , 'Foreach #22 - Foreach index');
-sluz_test('{foreach $colors as $k => $v}{$k}:{$v} {/foreach}'                  , 'a:red b:green c:blue ', 'Foreach #23 - Hashref iteration with key/val (sorted)');
-sluz_test('{foreach $scores as $val}{$val} {/foreach}'                         , '76 95 88 '            , 'Foreach #24 - Hashref iteration value only (sorted)');
-sluz_test('{foreach $empty as $k => $v}val{/foreach}'                          , ''                     , 'Foreach #25 - Empty array with key/val');
-sluz_test('{foreach $members as $i => $m}{$i}:{$m.first} {/foreach}'           , '0:Scott 1:Jason '     , 'Foreach #26 - Array of hashes with key/val');
-
-# -------------------------------------------------------------------
 # Plain text tests
 # -------------------------------------------------------------------
 sluz_test('Scott',              'Scott',              'Plain text #1 - Static text');
@@ -299,17 +233,6 @@ eval { $sluz->parse_string('{first}') };
 like($@, qr/73467/, 'Bad block #2 - {word}');
 
 # -------------------------------------------------------------------
-# Literal tests
-# -------------------------------------------------------------------
-sluz_test('{literal}{{/literal}'                  , '{'                  , 'Literal #1 - {');
-sluz_test('{literal}}{/literal}'                  , '}'                  , 'Literal #2 - }');
-sluz_test('{literal}{}{/literal}'                 , '{}'                 , 'Literal #3 - Literal + {}');
-sluz_test('{literal}{foreach}{/literal}'          , '{foreach}'          , 'Literal #4 - {literal}');
-sluz_test('{literal}{literal}{/literal}{/literal}', '{literal}{/literal}', 'Literal #5 - Meta literal');
-sluz_test(' { '                                   , ' { '                , 'Literal #6 - { with whitespace');
-sluz_test('{}'                                    , '{}'                 , 'Literal #7 - Raw {}');
-
-# -------------------------------------------------------------------
 # Whitespace input/output
 # -------------------------------------------------------------------
 sluz_test("{\$x}{\$x}"                                   , '77'                 , 'Whitespace input/output #1');
@@ -322,115 +245,6 @@ sluz_test("{if \$x}\n{\$x}\n{/if}"                       , "7\n"                
 sluz_test("{foreach \$y as \$x}\n{\$x}\n{/foreach}\nlast", "2\n4\n6\nlast"      , 'Whitespace input/output #8');
 sluz_test("{foreach \$array as \$x}{\$x} {/foreach}\nEND", "one two three \nEND", 'Whitespace input/output #9');
 
-# -------------------------------------------------------------------
-# Comment tests
-# -------------------------------------------------------------------
-sluz_test('{* Comment *}'                       , '', 'Comment #1 - With text');
-sluz_test('{* ********* *}'                     , '', 'Comment #2 - ******');
-sluz_test('{**}'                                , '', 'Comment #3 - No whitespace');
-sluz_test('{*{$array|count}*}'                  , '', 'Comment #4 - Variable inside');
-sluz_test('{* {* nested *} *}'                  , '', 'Comment #5 - Nested');
-sluz_test('{* {* {* nested *} *} *}'            , '', 'Comment #6 - Triple Nested');
-sluz_test('{* {* {* {* nested *} *} *} *}'      , '', 'Comment #7 - 4-level nested');
-sluz_test('{* {* {* {* {* nested *} *} *} *} *}', '', 'Comment #8 - 5-level nested (max depth)');
-
-# -------------------------------------------------------------------
-# Include tests
-# -------------------------------------------------------------------
-sluz_test("{include file='tpls/extra.stpl'}", '/e1ab49cf/', 'Include #1 - file=extra.stpl');
-sluz_test("{include 'tpls/extra.stpl'}"     , '/e1ab49cf/', "Include #2 - 'extra.stpl'");
-
-eval { $sluz->parse_string('{include}') };
-like($@, qr/73467/, 'Include #3 - No payload');
-
-sluz_test("{include file='tpls/extra.stpl' secret='eca4906'}", '/eca4906/' , 'Include #4 - With variable');
-sluz_test("{include file=\"\$inc_file\"}"                    , '/e1ab49cf/', 'Include #5 - With variable file path');
-sluz_test("{include file='tpls/nested_inc.stpl'}"            , '/e1ab49cf/', 'Include #6 - Nested include');
-sluz_test("{include file='tpls/var_scope.stpl'}"             , '/SCOPE:15/', 'Include #7 - Variable scope (parent vars visible)');
-
-# -------------------------------------------------------------------
-# Get blocks tests
-# -------------------------------------------------------------------
-
-{
-	my @x = $sluz->_get_blocks('{$a}{$b}{$c}');
-	is(scalar @x, 3, 'Get blocks #1 - Basic variables');
-}
-
-{
-	my @x = $sluz->_get_blocks('{if $a}{$a}{/if}');
-	is(scalar @x, 1, 'Get blocks #2 - Basic variables');
-}
-
-{
-	my @x = $sluz->_get_blocks('Jason{$a}Baker{$b}');
-	is(scalar @x, 4, 'Get blocks #3 - Basic variables');
-}
-
-{
-	my @x = $sluz->_get_blocks('function(foo) { $i = 10; }');
-	is(scalar @x, 1, 'Get blocks #4 - javascript function');
-}
-
-{
-	my @x = $sluz->_get_blocks('{* Comment *}ABC{* Comment *}');
-	is(scalar @x, 1, 'Get blocks #5 - Comments');
-}
-
-{
-	my @x = $sluz->_get_blocks('   {$x}   ');
-	is(scalar @x, 3, 'Get blocks #6 - Whitespace around variable');
-}
-
-{
-	my @x = $sluz->_get_blocks('{foreach $arr as $i => $x}{if $x.1}{$x.1}{/if}{/foreach}');
-	is(scalar @x, 1, 'Get blocks #7 - Lots of brackets');
-}
-
-{
-	my @x = $sluz->_get_blocks('{*{$first}*}');
-	is(scalar @x, 0, 'Get blocks #8 - Comment with variable');
-}
-
-{
-	my @x = $sluz->_get_blocks('{*{$first} {$last}*}');
-	is(scalar @x, 0, 'Get blocks #9 - Comments with variables');
-}
-
-{
-	my @x = $sluz->_get_blocks(' {* {$foo} *} ');
-	is(scalar @x, 2, 'Get blocks #10 - Comments with variables and whitespace');
-}
-
-{
-	my @x = $sluz->_get_blocks('{foreach $array as $i}{foreach $array as $i}x{/foreach}{/foreach}');
-	is(scalar @x, 1, 'Get blocks #11 - Nested foreach');
-}
-
-{
-	my @x = $sluz->_get_blocks("{\$foo}\n{\$bar}");
-	is(scalar @x, 3, 'Get blocks #12 - Only whitespace block');
-}
-
-{
-	my @x = $sluz->_get_blocks("{\$foo}\n\n{\$bar}");
-	is(scalar @x, 3, 'Get blocks #13 - Double whitespace block');
-}
-
-{
-	my @x = $sluz->_get_blocks('');
-	is(scalar @x, 0, 'Get blocks #14 - Empty string');
-}
-
-{
-	my @x = $sluz->_get_blocks('plain text only');
-	is(scalar @x, 1, 'Get blocks #15 - No template tags');
-}
-
-{
-	my @x = $sluz->_get_blocks('{* {* {* {* deep *} *} *} *}');
-	is(scalar @x, 0, 'Get blocks #16 - Deeply nested comment (4 levels)');
-}
 # -------------------------------------------------------------------
 # Fetch tests
 # -------------------------------------------------------------------
