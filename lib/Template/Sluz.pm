@@ -58,11 +58,13 @@ sub join {
 
 sub new {
     my $class = shift;
+    my %args  = @_;
     my $self  = {
         version             => $VERSION,
         tpl_file            => undef,
         inc_tpl_file        => undef,
-        debug               => 0,
+        debug               => $args{debug}       // 0,
+        auto_escape         => $args{auto_escape} // 0,
         tpl_vars            => {},
         parent_tpl          => undef,
         var_prefix          => 'sluz_pfx',
@@ -217,6 +219,22 @@ sub escape {
     $str =~ s/'/&#x27;/g;
 
     return $str;
+}
+
+# Bypass auto-escaping when auto_escape is on: {$var|noescape}
+sub noescape {
+    return shift;
+}
+
+# Apply auto-escaping if enabled, otherwise return value unchanged.
+# Ref types (ARRAY/HASH) pass through unescaped.
+sub _esc {
+    my ($self, $val) = @_;
+
+    if (!$self->{auto_escape}) { return $val }
+    if (ref $val)              { return $val }
+
+    return escape($val);
 }
 
 sub ltrim_one {
@@ -511,7 +529,7 @@ sub _process_blocks {
                 }
                 if (ref $val eq 'ARRAY')  { $$out .= 'ARRAY' }
                 elsif (ref $val eq 'HASH') { $$out .= 'HASH' }
-                elsif (defined $val)       { $$out .= $val }
+                elsif (defined $val)       { $$out .= $self->_esc($val) }
                 next;
             }
             $$out .= $self->_process_block($block, $x->[1]);
@@ -540,7 +558,7 @@ sub _process_blocks {
             }
             if (ref $val eq 'ARRAY')  { $html .= 'ARRAY' }
             elsif (ref $val eq 'HASH') { $html .= 'HASH' }
-            elsif (defined $val)       { $html .= $val }
+            elsif (defined $val)       { $html .= $self->_esc($val) }
             next;
         }
         # If block fast path — skip _process_block dispatch
@@ -622,7 +640,7 @@ sub _variable_block {
         }
         if (ref $ret eq 'ARRAY') { return 'ARRAY' }
         if (ref $ret eq 'HASH')  { return 'HASH' }
-        if (defined $ret) { return $ret }
+        if (defined $ret) { return $self->_esc($ret) }
         return '';
     }
 
@@ -648,12 +666,17 @@ sub _variable_block {
             }
             my $pre = $self->array_dive($key, $self->{tpl_vars}) // '';
 
+            my $seen_escape   = 0;
+			my $seen_noescape = 0;
+
             # Split on | not inside double or single quotes (supports chained
             # modifiers like {$x|uc|substr:0,3})
             my $pipe_re = qr/\|(?![^"]*"(?:(?:[^"]*"){2})*[^"]*$)(?![^']*'(?:(?:[^']*'){2})*[^']*$)/;
             for my $m_part (split $pipe_re, $mod) {
                 my @x    = split /:/, $m_part, 2;
                 my $func = $x[0] // '';
+                if ($func eq 'escape')   { $seen_escape   = 1 }
+                if ($func eq 'noescape') { $seen_noescape = 1 }
                 my $param_str = $x[1] // '';
                 my @params = ($pre);
 
@@ -693,6 +716,9 @@ sub _variable_block {
                 }
             }
 
+            if ($self->{auto_escape} && !$seen_noescape && !$seen_escape) {
+                return $self->_esc($pre);
+            }
             return $pre;
         }
     }
@@ -700,7 +726,7 @@ sub _variable_block {
     my $ret = $self->array_dive($str, $self->{tpl_vars});
     if (ref $ret eq 'ARRAY') { return 'ARRAY' }
     if (ref $ret eq 'HASH')  { return 'HASH' }
-    if (defined $ret) { return $ret }
+    if (defined $ret) { return $self->_esc($ret) }
     return '';
 }
 
@@ -862,7 +888,7 @@ sub _foreach_block {
                     }
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                    elsif (defined $val)       { $ret .= $val }
+                    elsif (defined $val)       { $ret .= $self->_esc($val) }
                 } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
@@ -915,7 +941,7 @@ sub _foreach_block {
                     }
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                    elsif (defined $val)       { $ret .= $val }
+                    elsif (defined $val)       { $ret .= $self->_esc($val) }
                 } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
@@ -1318,6 +1344,15 @@ Output:
 
 Create a new Template::Sluz instance.
 
+    my $sluz = Template::Sluz->new();
+
+Options (all are optional):
+
+    my $sluz = Template::Sluz->new(
+        auto_escape => 1,   # auto HTML-escape all variable output
+        debug       => 1,   # enable debug mode (currently unused)
+    );
+
 =item B<assign>
 
 Assign template variables.
@@ -1411,6 +1446,8 @@ parameters) by default.  The C<{$var}> construct emits the value verbatim,
 so a template that renders user data without escaping is vulnerable to
 cross-site scripting (XSS).
 
+=head2 Escape modifier
+
 Use the C<|escape> modifier on any variable that may contain
 user-supplied data:
 
@@ -1421,6 +1458,23 @@ to their HTML entity equivalents.  It can be chained with other modifiers:
 
     {$comment|trim|escape}
     {$name|uc|escape}
+
+=head2 Auto-escape mode
+
+Enable automatic HTML escaping for all variable output by setting the
+C<auto_escape> option on construction:
+
+    my $sluz = Template::Sluz->new(auto_escape => 1);
+
+When enabled, every C<{$var}> expression is automatically HTML-escaped.
+Use C<|noescape> to emit raw HTML for a specific variable:
+
+    {$trusted_html|noescape}
+
+Explicit C<|escape> takes priority and prevents double-escaping.
+Auto-escape is off by default for backward compatibility.
+
+=head2 Built-in escape functions
 
 =over 4
 
@@ -1433,6 +1487,11 @@ HTML-escape a string for safe output in an HTML context.  Encodes:
     >  => &gt;
     "  => &quot;
     '  => &#x27;
+
+=item B<noescape>
+
+Identity passthrough. Bypasses auto-escaping when C<auto_escape> is
+enabled. Does nothing otherwise.
 
 =back
 
