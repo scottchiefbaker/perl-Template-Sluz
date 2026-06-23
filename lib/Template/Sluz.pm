@@ -202,6 +202,23 @@ sub array_dive {
     return $arr;
 }
 
+# HTML-escape a string for safe output. Encodes & < > " ' to entities.
+# Usable as a modifier: {$var|escape} or as a callable: {escape($var)}
+sub escape {
+    my $str = shift // '';
+
+    if (ref $str eq 'ARRAY') { return 'ARRAY' }
+    if (ref $str eq 'HASH')  { return 'HASH' }
+
+    $str =~ s/&/&amp;/g;
+    $str =~ s/</&lt;/g;
+    $str =~ s/>/&gt;/g;
+    $str =~ s/"/&quot;/g;
+    $str =~ s/'/&#x27;/g;
+
+    return $str;
+}
+
 sub ltrim_one {
     my $self = shift;
     my $str  = shift // '';
@@ -1338,6 +1355,7 @@ Process a template string directly without a file.
     {$name|uc}
     {$name|substr:0,3}
     {$name|lc|ucfirst}
+    {$name|escape}
 
 =head2 Default values
 
@@ -1385,6 +1403,38 @@ When a function is called as a modifier the template variable is passed first
 and then it is followed by the params.
 
 Example: C<{$text|substr:0,10}> would map to the call C<substr($text, 0, 10)>
+
+=head1 SECURITY
+
+Template variables hold untrusted data (form input, database rows, URL
+parameters) by default.  The C<{$var}> construct emits the value verbatim,
+so a template that renders user data without escaping is vulnerable to
+cross-site scripting (XSS).
+
+Use the C<|escape> modifier on any variable that may contain
+user-supplied data:
+
+    {$comment|escape}
+
+The C<escape> modifier encodes C<&>, C<E<lt>>, C<E<gt>>, C<">, and C<'>
+to their HTML entity equivalents.  It can be chained with other modifiers:
+
+    {$comment|trim|escape}
+    {$name|uc|escape}
+
+=over 4
+
+=item B<escape>
+
+HTML-escape a string for safe output in an HTML context.  Encodes:
+
+    &  => &amp;
+    <  => &lt;
+    >  => &gt;
+    "  => &quot;
+    '  => &#x27;
+
+=back
 
 =head1 AUTHOR
 
