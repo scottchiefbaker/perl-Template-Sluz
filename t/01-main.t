@@ -19,7 +19,7 @@ sluz_test($sluz, '{$first}',                                'Scott',            
 sluz_test($sluz, '{$bogus_var}',                            '',                            'Basic #3 - Missing variable');
 sluz_test($sluz, '{$cust.first}',                           'Scott',                       'Basic #5 - Hash Lookup');
 sluz_test($sluz, '{$array.1}',                              'two',                         'Basic #6 - Array Lookup');
-sluz_test($sluz, '{$array|count}',                          '3',                           'Basic #7 - PHP Modifier array');
+sluz_test($sluz, '{$array|count}',                          '3',                           'Basic #7 - Modifier on array');
 sluz_test($sluz, '{$number + 3}',                           '18',                          'Basic #8 - Addition');
 sluz_test($sluz, '{$number * $debug}',                      '15',                          'Basic #9 - Multiplication of two vars');
 sluz_test($sluz, '{3}',                                     '3',                           'Basic #10 - Number literal');
@@ -49,26 +49,21 @@ eval { $sluz->parse_string('{$first') };
 like($@, qr/45821/, 'Basic #25 - Unclosed block variable');
 
 # Hash with default
-sluz_test($sluz, '{$cust.first|default:\'Jason\'}',         'Scott',                       'Basic #26 - Hash with default value, not used');
-sluz_test($sluz, '{$cust.foo|default:\'Jason\'}',           'Jason',                       'Basic #27 - Hash with default value, used');
-sluz_test($sluz, '{$array}',                                'ARRAY',                       'Basic #28 - Array used as a scalar');
-sluz_test($sluz, '{$first|substr:2}',                       'ott',                         'Basic #29 - PHP function with one param');
-sluz_test($sluz, '{$first|substr:2,2}',                     'ot',                          'Basic #30 - PHP function with two params');
-
-{
-    local $TODO = "Negated hash lookup";
-    sluz_test($sluz, '{if !$cust.age}unknown{else}{$age}{/if}', 'unknown',                 'Basic #31 - Negated hash lookup');
-}
-
-sluz_test($sluz, '{1.1234 + 2.3456}', '3.469'       , 'Basic #32 - Simple math that returns floating point');
-sluz_test($sluz, ''                 , ''            , 'Basic #33 - Empty template');
-sluz_test($sluz, ' '                , ' '           , 'Basic #34 - Whitespace only template');
-sluz_test($sluz, '{$bogus_var + 3}' , '3'           , 'Basic #35 - Undefined var in numeric expression');
-sluz_test($sluz, '{!$false}'        , '1'           , 'Basic #36 - Standalone negated expression (false to true)');
-sluz_test($sluz, '{!$true}'         , ''            , 'Basic #37 - Standalone negated expression (true to false)');
-sluz_test($sluz, '{$car}'           , 'Honda'       , 'Basic #38 - String variable set from hash');
-sluz_test($sluz, '{$ltuae}'         , '42'          , 'Basic #39 - Integer variable set from hash');
-sluz_test($sluz, '{$milk|join:":"}' , 'goat:cow:soy', 'Basic #40 - Array set from hash');
+sluz_test($sluz, '{$cust.first|default:\'Jason\'}'        , 'Scott'       , 'Basic #26 - Hash with default value                         , not used');
+sluz_test($sluz, '{$cust.foo|default:\'Jason\'}'          , 'Jason'       , 'Basic #27 - Hash with default value                         , used');
+sluz_test($sluz, '{$array}'                               , 'ARRAY'       , 'Basic #28 - Array used as a scalar');
+sluz_test($sluz, '{$first|substr:2}'                      , 'ott'         , 'Basic #29 - Perl function with one param');
+sluz_test($sluz, '{$first|substr:2, 2}'                   , 'ot'          , 'Basic #30 - Perl function with two params');
+sluz_test($sluz, '{if !$cust.age}unknown{else}{$age}{/if}', 'unknown'     , 'Basic #31 - Negated hash lookup');
+sluz_test($sluz, '{1.1234 + 2.3456}'                      , '3.469'       , 'Basic #32 - Simple math that returns floating point');
+sluz_test($sluz, ''                                       , ''            , 'Basic #33 - Empty template');
+sluz_test($sluz, ' '                                      , ' '           , 'Basic #34 - Whitespace only template');
+sluz_test($sluz, '{$bogus_var + 3}'                       , '3'           , 'Basic #35 - Undefined var in numeric expression');
+sluz_test($sluz, '{!$false}'                              , '1'           , 'Basic #36 - Standalone negated expression (false to true)');
+sluz_test($sluz, '{!$true}'                               , ''            , 'Basic #37 - Standalone negated expression (true to false)');
+sluz_test($sluz, '{$car}'                                 , 'Honda'       , 'Basic #38 - String variable set from hash');
+sluz_test($sluz, '{$ltuae}'                               , '42'          , 'Basic #39 - Integer variable set from hash');
+sluz_test($sluz, '{$milk|join:":"}'                       , 'goat:cow:soy', 'Basic #40 - Array set from hash');
 
 # -------------------------------------------------------------------
 # Custom/User functions
@@ -76,12 +71,7 @@ sluz_test($sluz, '{$milk|join:":"}' , 'goat:cow:soy', 'Basic #40 - Array set fro
 sluz_test($sluz, '{$word|truncate:3}',                      'cRa',                         'Custom function #1 - Modifier with param');
 sluz_test($sluz, '{$last|truncate:4|truncate:2}',           'Ba',                          'Custom function #2 - Two modifiers with params');
 sluz_test($sluz, '{$y|join_comma}',                         '2, 4, 6',                     'Custom function #3 - Function with default param');
-
-{
-    local $TODO = "join_comma with numeric param";
-    sluz_test($sluz, '{$y|join_comma:9}',                   '29496',                       'Custom function #4 - Function with integer param');
-}
-
+sluz_test($sluz, '{$y|join_comma:9}',                       '29496',                       'Custom function #4 - Function with integer param');
 sluz_test($sluz, '{$y|join_comma:"*"}',                     '2*4*6',                       'Custom function #5 - Function with string param');
 sluz_test($sluz, '{$y|join_comma:"|"}',                     '2|4|6',                       'Custom function #6 - Function with string param pipe');
 sluz_test($sluz, '{$y|join_comma:","}',                     '2,4,6',                       'Custom function #7 - Function with string param pipe comma');
