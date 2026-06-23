@@ -3,9 +3,9 @@ use strict;
 use warnings;
 use 5.016;
 
-use lib 'lib';
-use Template::Sluz;
 use Test::More;
+use FindBin;
+require "$FindBin::Bin/test_setup.pl";
 
 # ---------------------------------------------------------------------------
 # Test opt-in auto_escape mode — escapes all variable output automatically

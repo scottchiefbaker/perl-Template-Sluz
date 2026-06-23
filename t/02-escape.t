@@ -3,31 +3,19 @@ use strict;
 use warnings;
 use 5.016;
 
-use lib 'lib';
-use Template::Sluz;
-
 use Test::More;
+use FindBin;
+require "$FindBin::Bin/test_setup.pl";
 
-# -------------------------------------------------------------------
-# Setup
-# -------------------------------------------------------------------
-my $sluz = Template::Sluz->new();
-$sluz->assign('first'        => 'Scott');
-$sluz->assign('animal'       => 'Kitten');
-$sluz->assign('array'        => ['one', 'two', 'three']);
-$sluz->assign('zero'         => 0);
-$sluz->assign('null'         => undef);
-
-# XSS payloads
-$sluz->assign('xss_payload',   '<script>alert(1)</script>');
-$sluz->assign('html_fragment', '<img src=x onerror=alert(1)>');
-
-# Entity encoding coverage
-$sluz->assign('amps',       'A & B');
-$sluz->assign('quotes',     qq{"double" and 'single'});
-$sluz->assign('angles',     '<tag>');
-$sluz->assign('mixed_case', '<Script>');
-$sluz->assign('bad_items',  ['<a>', '<b>', '<c>']);
+my $sluz = setup_sluz(extra => {
+    xss_payload   => '<script>alert(1)</script>',
+    html_fragment => '<img src=x onerror=alert(1)>',
+    amps          => 'A & B',
+    quotes        => qq{"double" and 'single'},
+    angles        => '<tag>',
+    mixed_case    => '<Script>',
+    bad_items     => ['<a>', '<b>', '<c>'],
+});
 
 # -------------------------------------------------------------------
 # Escape modifier tests (CWE-79 XSS mitigation)

@@ -3,16 +3,11 @@ use strict;
 use warnings;
 use 5.016;
 
-use File::Basename qw(dirname);
-use lib dirname(__FILE__) . '/../lib';
-use Template::Sluz;
-
 use Test::More;
+use FindBin;
+require "$FindBin::Bin/test_setup.pl";
 
-# -------------------------------------------------------------------
-# Setup
-# -------------------------------------------------------------------
-my $sluz = Template::Sluz->new();
+my $sluz = setup_sluz();
 
 # -------------------------------------------------------------------
 # Get blocks tests
