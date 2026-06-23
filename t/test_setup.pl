@@ -3,7 +3,6 @@ use warnings;
 use 5.016;
 
 use File::Basename qw(dirname);
-use lib dirname(__FILE__) . '/../lib';
 use Template::Sluz;
 use Test::More;
 

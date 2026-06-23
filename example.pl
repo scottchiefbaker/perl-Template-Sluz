@@ -4,7 +4,6 @@ use strict;
 use warnings;
 use v5.16;
 
-use lib 'lib';
 use Template::Sluz;
 
 ###############################################################################
