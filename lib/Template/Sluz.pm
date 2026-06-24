@@ -1500,6 +1500,20 @@ Process a template string directly without a file.
 
     $s->parse_string('Hello {$name}');
 
+=item B<set_delimiters>
+
+Change the template delimiters from the default C<{> and C<}> to a custom
+open and close character.  Both arguments are required and must be exactly
+one character each.  The two characters must be different.
+
+    $s->set_delimiters('<', '>');
+    print $s->parse_string('Hello <$name>');
+
+This is useful when template content contains curly braces (e.g., inline
+CSS, JavaScript, or JSON) that would otherwise conflict with the default
+template syntax.  All subsequent calls to C<fetch>, C<parse_string>, etc.
+will use the new delimiters.
+
 =back
 
 =head1 TEMPLATE SYNTAX
@@ -1549,6 +1563,30 @@ Process a template string directly without a file.
 =head2 Comments
 
     {* This is a comment *}
+
+=head2 Alternate Delimiters
+
+By default the template engine uses C<{> and C<}> as delimiters.  You can
+change them to any single open and close character using C<set_delimiters>:
+
+    $s->set_delimiters('<', '>');
+
+    print $s->parse_string('Hello <$name>');
+
+All template syntax works the same way with alternate delimiters:
+
+    <if $age > 18>
+        Adult
+    <else>
+        Not adult
+    </if>
+
+    {foreach $items as $item}
+        <$item>
+    {/foreach}
+
+This is useful when your template content contains curly braces that would
+conflict with the default delimiters.
 
 =head1 FUNCTIONS AS MODIFIERS
 

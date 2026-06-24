@@ -81,6 +81,22 @@ Info: red / 39
     $s->parse_string('Hello {$name}');
     ```
 
+- **set\_delimiters**
+
+    Change the template delimiters from the default `{` and `}` to a custom
+    open and close character.  Both arguments are required and must be exactly
+    one character each.  The two characters must be different.
+
+    ```
+    $s->set_delimiters('<', '>');
+    print $s->parse_string('Hello <$name>');
+    ```
+
+    This is useful when template content contains curly braces (e.g., inline
+    CSS, JavaScript, or JSON) that would otherwise conflict with the default
+    template syntax.  All subsequent calls to `fetch`, `parse_string`, etc.
+    will use the new delimiters.
+
 ## Template Syntax
 
 ### Variables
@@ -144,6 +160,34 @@ Info: red / 39
 ```
 {* This is a comment *}
 ```
+
+### Alternate Delimiters
+
+By default the template engine uses `{` and `}` as delimiters.  You can
+change them to any single open and close character using `set_delimiters`:
+
+```
+$s->set_delimiters('<', '>');
+
+print $s->parse_string('Hello <$name>');
+```
+
+All template syntax works the same way with alternate delimiters:
+
+```
+<if $age > 18>
+    Adult
+<else>
+    Not adult
+</if>
+
+{foreach $items as $item}
+    <$item>
+{/foreach}
+```
+
+This is useful when your template content contains curly braces that would
+conflict with the default delimiters.
 
 ## Functions as Modifiers
 
