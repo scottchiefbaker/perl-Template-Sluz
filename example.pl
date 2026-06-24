@@ -22,6 +22,9 @@ $s->assign('version', $Template::Sluz::VERSION);
 #print $s->parse_string('Hello {$name}');
 print $s->fetch(Template::Sluz::SLUZ_INLINE);
 
+$s->set_delimiters("<", ">");
+print $s->parse_string("Hello <\$name>, you are <\$data.age>\n");
+
 ###############################################################################
 ###############################################################################
 

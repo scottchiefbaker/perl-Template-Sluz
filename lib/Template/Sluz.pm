@@ -72,6 +72,8 @@ sub new {
         perl_file_dir       => undef,
         fetch_called        => 0,
         char_pos            => -1,
+        open_delim          => '{',
+        close_delim         => '}',
         _sub_cache          => {},
         __S                 => {}, # Cached prefixed var hash used by _peval
         _convert_cache      => {}, # Cached _convert_vars results (avoids re-running regex on repeated expressions)
@@ -81,6 +83,7 @@ sub new {
     };
 
     bless $self, $class;
+    $self->_precompute_tags();
     return $self;
 }
 
@@ -170,6 +173,38 @@ sub parent_tpl {
     }
 
     return $self->{parent_tpl};
+}
+
+sub set_delimiters {
+    my $self  = shift;
+    my $open  = shift;
+    my $close = shift;
+
+    if (!defined $open || !defined $close) {
+        $self->_error_out("set_delimiters requires both open and close delimiter arguments", 51234);
+    }
+
+    if (length($open) != 1 || length($close) != 1) {
+        $self->_error_out("Delimiters must be single characters", 51235);
+    }
+
+    if ($open eq $close) {
+        $self->_error_out("Open and close delimiters must be different characters", 51236);
+    }
+
+    $self->{open_delim}  = $open;
+    $self->{close_delim} = $close;
+
+    $self->_precompute_tags();
+
+    # Clear all caches since results are delimiter-dependent
+    $self->{_blocks_cache}       = {};
+    $self->{_if_rules_cache}     = {};
+    $self->{_convert_cache}      = {};
+    $self->{_sub_cache}          = {};
+    $self->{_verified_sub_cache} = {};
+
+    return;
 }
 
 # Dive down an array or hashref using our dotted syntax
@@ -286,7 +321,9 @@ sub find_ending_tag {
 sub get_tokens {
     my $self = shift;
     my $str  = shift // '';
-    my @tokens = split /({[^}]+})/, $str;
+    my $o = quotemeta($self->{open_delim});
+    my $c = quotemeta($self->{close_delim});
+    my @tokens = split /($o[^$c]+$c)/, $str;
     @tokens = grep { defined && length } @tokens;
     return @tokens;
 }
@@ -294,10 +331,13 @@ sub get_tokens {
 sub is_if_token {
     my $self = shift;
     my $str  = shift // '';
-    if ($str eq '{else}') { return 1 }
-    if ($str eq '{/if}') { return 1 }
-    if ($str =~ /^\{(?:if|elseif)\s+(.+?)\}$/) {
-        return $1;
+    if ($str eq $self->{_tag_else})   { return 1 }
+    if ($str eq $self->{_tag_if_close}) { return 1 }
+    if (index($str, $self->{_tag_if}) == 0 || index($str, $self->{_tag_elseif}) == 0) {
+        my $inner = substr($str, length($self->{open_delim}));
+        $inner =~ s/^\S+\s+//;  # strip 'if ' or 'elseif '
+        $inner =~ s/\Q$self->{close_delim}\E$//;
+        return $inner;
     }
     return '';
 }
@@ -305,6 +345,26 @@ sub is_if_token {
 # -------------------------------------------------------------------
 # Private methods
 # -------------------------------------------------------------------
+
+sub _precompute_tags {
+    my $self = shift;
+    my $o    = $self->{open_delim};
+    my $c    = $self->{close_delim};
+
+    $self->{_tag_if}              = "${o}if ";
+    $self->{_tag_if_close}        = "${o}/if${c}";
+    $self->{_tag_else}            = "${o}else${c}";
+    $self->{_tag_elseif}          = "${o}elseif ";
+    $self->{_tag_foreach}         = "${o}foreach ";
+    $self->{_tag_foreach_close}   = "${o}/foreach${c}";
+    $self->{_tag_include}         = "${o}include ";
+    $self->{_tag_literal}         = "${o}literal${c}";
+    $self->{_tag_literal_close}   = "${o}/literal${c}";
+    $self->{_tag_comment_open}    = "${o}*";
+    $self->{_tag_comment_close}   = "*${c}";
+
+    return;
+}
 
 sub _get_perl_file {
     my $self = shift;
@@ -386,23 +446,25 @@ sub _get_blocks {
         return @{$self->{_blocks_cache}{$str}};
     }
 
+    my $od   = $self->{open_delim};
+    my $cd   = $self->{close_delim};
     my $slen = length $str;
     my $start = 0;
     my $i;
     my @blocks;
 
-    my $z = index($str, '{');
+    my $z = index($str, $od);
     if ($z < 0) { $z = $slen }
 
     for ($i = $z; $i < $slen; $i++) {
         my $char      = substr($str, $i, 1);
-        my $is_open   = $char eq '{';
-        my $is_closed = $char eq '}';
+        my $is_open   = $char eq $od;
+        my $is_closed = $char eq $cd;
 
         if (!$is_open && !$is_closed) {
-            my $next_open  = index($str, '{', $i);
+            my $next_open  = index($str, $od, $i);
             if ($next_open < 0) { $next_open = $slen }
-            my $next_close = index($str, '}', $i);
+            my $next_close = index($str, $cd, $i);
             if ($next_close < 0) { $next_close = $slen }
             if ($next_open < $next_close) {
                 $i = $next_open - 1;
@@ -429,7 +491,9 @@ sub _get_blocks {
                 $next_c = ' ';
             }
             my $chk = $prev_c . $char . $next_c;
-            if ($chk =~ /\s[\{\}]\s/) { $is_open = 0 }
+            my $od_qr = quotemeta($od);
+            my $cd_qr = quotemeta($cd);
+            if ($chk =~ /\s[$od_qr$cd_qr]\s/) { $is_open = 0 }
             if ($next_c eq '*') { $is_comment = 1 }
         }
 
@@ -440,14 +504,18 @@ sub _get_blocks {
             my $len   = $i - $start + 1;
             my $block = substr($str, $start, $len);
 
-            if ($block =~ /^\{(if|foreach|literal)\b/) {
-                my $open_tag  = $1;
-                my $close_tag = "{/$open_tag}";
+            my $matched_block;
+            if    (index($block, $self->{_tag_if}) == 0)        { $matched_block = 'if' }
+            elsif (index($block, $self->{_tag_foreach}) == 0)   { $matched_block = 'foreach' }
+            elsif (index($block, $self->{_tag_literal}) == 0)   { $matched_block = 'literal' }
+
+            if ($matched_block) {
+                my $close_tag = "${od}/${matched_block}${cd}";
                 for (my $j = $i + 1; $j < length $str; $j++) {
-                    if (substr($str, $j, 1) eq '}') {
+                    if (substr($str, $j, 1) eq $cd) {
                         my $tmp = substr($str, $start, $j - $start + 1);
-                        my $oc  = () = $tmp =~ /\{\Q$open_tag\E/g;
-                        my $cc  = () = $tmp =~ m@\{\/\Q$open_tag\E\}@g;
+                        my $oc  = () = $tmp =~ /\Q${od}${matched_block}\E/g;
+                        my $cc  = () = $tmp =~ /\Q${close_tag}\E/g;
                         if ($oc == $cc) {
                             $block = $tmp;
                             last;
@@ -462,12 +530,12 @@ sub _get_blocks {
         }
 
         if ($is_comment) {
-            my $end = $self->find_ending_tag(substr($str, $start), '{*', '*}');
+            my $end = $self->find_ending_tag(substr($str, $start), $self->{_tag_comment_open}, $self->{_tag_comment_close});
             if (!defined $end) {
                 my ($line, $col, $file) = $self->_get_char_location($i, $self->{tpl_file});
-                $self->_error_out("Missing closing <code>*}</code> for comment in <code>$file</code> on line #$line", 48724);
+                $self->_error_out("Missing closing <code>$self->{_tag_comment_close}</code> for comment in <code>$file</code> on line #$line", 48724);
             }
-            $start += $end + 2;
+            $start += $end + length($self->{_tag_comment_close});
             $i = $start;
         }
     }
@@ -485,10 +553,14 @@ sub _get_blocks {
     my $prev_is_if = 0;
     for my $i (0 .. $#blocks) {
         my $bstr     = $blocks[$i][0] // '';
-        my $cur_is_if = ($bstr =~ /^\{if\b/ || $bstr =~ /^\{for/);
+        my $cur_is_if = (index($bstr, $self->{_tag_if}) == 0 || index($bstr, $self->{_tag_foreach}) == 0);
         if ($prev_is_if) {
             my $should_strip = 1;
-            if ($blocks[$i-1][0] =~ /^\{foreach .+?\}(.*)\{\/foreach\}$/s) {
+            my $fc_qr = quotemeta($self->{_tag_foreach_close});
+            if ($bstr =~ /^$fc_qr/s) {
+                # This is actually the end of a foreach, not an if — check if it's a single-line foreach
+            }
+            if ($blocks[$i-1][0] =~ /^\Q$self->{_tag_foreach}\E.+?\}(.*)\Q$self->{_tag_foreach_close}\E$/s) {
                 $should_strip = (substr($1, -1) eq "\n") ? 1 : 0;
             }
             if ($should_strip) {
@@ -507,19 +579,24 @@ sub _process_blocks {
     my $blocks = shift;
     my $out    = shift;  # Optional: ref to append output to (avoids temp string + concat)
 
+    my $od = $self->{open_delim};
+    my $cd = $self->{close_delim};
+    my $var_tag = "${od}\$";
+    my $var_re  = qr/^\Q$od\E\$(\w[\w.]*)\Q$cd\E$/;
+
     if ($out) {
         for my $x (@$blocks) {
             my $block = $x->[0];
             next unless length $block;
             my $first = substr($block, 0, 1);
-            if ($first ne '{') {
+            if ($first ne $od) {
                 $$out .= $block;
                 next;
             }
             # Fast path: {$var} or {$var.dot} with no modifier — inline
             # variable resolution, skip _process_block AND _variable_block
-            if (substr($block, 0, 2) eq '{$' && index($block, '|') < 0
-                && $block =~ /^\{\$(\w[\w.]*)\}$/) {
+            if (substr($block, 0, 2) eq $var_tag && index($block, '|') < 0
+                && $block =~ $var_re) {
                 my $var = $1;
                 my $val;
                 if (index($var, '.') < 0) {
@@ -542,13 +619,13 @@ sub _process_blocks {
         my $block = $x->[0];
         next unless length $block;
         my $first = substr($block, 0, 1);
-        if ($first ne '{') {
+        if ($first ne $od) {
             $html .= $block;
             next;
         }
         # Fast path: {$var} or {$var.dot} with no modifier
-        if (substr($block, 0, 2) eq '{$' && index($block, '|') < 0
-            && $block =~ /^\{\$(\w[\w.]*)\}$/) {
+        if (substr($block, 0, 2) eq $var_tag && index($block, '|') < 0
+            && $block =~ $var_re) {
             my $var = $1;
             my $val;
             if (index($var, '.') < 0) {
@@ -562,7 +639,10 @@ sub _process_blocks {
             next;
         }
         # If block fast path — skip _process_block dispatch
-        if (substr($block, 0, 4) eq '{if ' && substr($block, -5) eq '{/if}') {
+        my $tif_len  = length($self->{_tag_if});
+        my $tifc_len = length($self->{_tag_if_close});
+        if (substr($block, 0, $tif_len) eq $self->{_tag_if}
+            && substr($block, -$tifc_len) eq $self->{_tag_if_close}) {
             $self->{char_pos} = $x->[1];
             $html .= $self->_if_block($block);
             next;
@@ -580,38 +660,52 @@ sub _process_block {
 
     $self->{char_pos} = $char_pos;
 
+    my $od = $self->{open_delim};
+    my $cd = $self->{close_delim};
+
     # 1. Variable block {$foo} or {$foo|modifier}
-    if (substr($str, 0, 2) eq '{$' && $str =~ /^\{\$([\w|.'";\t :,!@#%^&*?_\/\\\-]+)\}$/) {
+    my $var_pattern = qr/^\Q$od\E\$([\w|.'";\t :,!@#%^&*?_\/\\\-]+)\Q$cd\E$/;
+    if (substr($str, 0, 2) eq "${od}\$" && $str =~ $var_pattern) {
         return $self->_variable_block($1);
     }
 
     # 2. If block {if ...}{/if}
-    if (substr($str, 0, 4) eq '{if ' && substr($str, -5) eq '{/if}') {
+    my $tif_len  = length($self->{_tag_if});
+    my $tifc_len = length($self->{_tag_if_close});
+    if (substr($str, 0, $tif_len) eq $self->{_tag_if}
+        && substr($str, -$tifc_len) eq $self->{_tag_if_close}) {
         return $self->_if_block($str);
     }
 
     # 3. Foreach block {foreach ...}{/foreach}
-    if (substr($str, 0, 9) eq '{foreach ' && $str =~ /^\{foreach (\$\w[\w.]*) as \$(\w+)(?: => \$(\w+))?\}(.+)\{\/foreach\}$/s) {
+    my $tfe_len = length($self->{_tag_foreach});
+    my $tfec_len = length($self->{_tag_foreach_close});
+    my $foreach_re = qr/^\Q$od\Eforeach (\$\w[\w.]*) as \$(\w+)(?: => \$(\w+))?\Q$cd\E(.+)\Q$od\E\/foreach\Q$cd\E$/s;
+    if (substr($str, 0, $tfe_len) eq $self->{_tag_foreach} && $str =~ $foreach_re) {
         return $self->_foreach_block($1, $2, $3, $4);
     }
 
     # 4. Include block {include ...}
-    if (substr($str, 0, 9) eq '{include ') {
+    if (substr($str, 0, length($self->{_tag_include})) eq $self->{_tag_include}) {
         return $self->_include_block($str);
     }
 
     # 5. Literal block {literal}...{/literal}
-    if (substr($str, 0, 9) eq '{literal}' && $str =~ /^\{literal\}(.+)\{\/literal\}$/s) {
+    my $tlit_len   = length($self->{_tag_literal});
+    my $tlitc_len  = length($self->{_tag_literal_close});
+    my $literal_re = qr/^\Q$od\Eliteral\Q$cd\E(.+)\Q$od\E\/literal\Q$cd\E$/s;
+    if (substr($str, 0, $tlit_len) eq $self->{_tag_literal} && $str =~ $literal_re) {
         return $1;
     }
 
     # 6. Expression / function block
-    if ($str =~ /^\{(.+)}$/s) {
+    my $expr_re = qr/^\Q$od\E(.+)\Q$cd\E$/s;
+    if ($str =~ $expr_re) {
         return $self->_expression_block($str, $1);
     }
 
     # 7. Unclosed tag
-    if (substr($str, -1) ne '}') {
+    if (substr($str, -1) ne $cd) {
         my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
         $self->_error_out("Unclosed tag <code>$str</code> in <code>$file</code> on line #$line", 45821);
     }
@@ -738,10 +832,15 @@ sub _if_block {
     if (exists $self->{_if_rules_cache}{$str}) {
         @rules = @{$self->{_if_rules_cache}{$str}};
     } else {
-        my $is_simple = index($str, '{else', 7) < 0;
+        my $od = $self->{open_delim};
+        my $cd = $self->{close_delim};
+        my $isimple_start = length($od) + 1;
+        my $else_check = $od . 'else';
+        my $is_simple = index($str, $else_check, $isimple_start) < 0;
 
         if ($is_simple) {
-            $str =~ /\{if (.+?)}(.+)\{\/if\}/s;
+            my $if_re = qr/\Q$od\Eif (.+?)\Q$cd\E(.+)\Q$od\E\/if\Q$cd\E/s;
+            $str =~ $if_re;
             my $cond    = $1 // '';
             my $payload = $2 // '';
             $payload = $self->ltrim_one($payload, "\n");
@@ -787,18 +886,21 @@ sub _foreach_block {
 
     # Pre-classify blocks for fast dispatch in the loop (cached in block arrays)
     # type: -1=empty, 0=text, 1=simple_var, 2=if_block, 99=other
+    my $od = $self->{open_delim};
+    my $cd = $self->{close_delim};
     for my $b (@blocks) {
         next if defined $b->[2];
         my $bs = $b->[0];
         if (!length $bs) {
             $b->[2] = -1;
-        } elsif (substr($bs, 0, 1) ne '{') {
+        } elsif (substr($bs, 0, 1) ne $od) {
             $b->[2] = 0;
-        } elsif (substr($bs, 0, 2) eq '{$' && index($bs, '|') < 0
-                 && $bs =~ /^\{\$(\w[\w.]*)\}$/) {
+        } elsif (substr($bs, 0, 2) eq "${od}\$" && index($bs, '|') < 0
+                 && $bs =~ /^\Q$od\E\$(\w[\w.]*)\Q$cd\E$/) {
             $b->[2] = 1;
             $b->[3] = $1;
-        } elsif (substr($bs, 0, 4) eq '{if ' && substr($bs, -5) eq '{/if}') {
+        } elsif (substr($bs, 0, length($self->{_tag_if})) eq $self->{_tag_if}
+                 && substr($bs, -length($self->{_tag_if_close})) eq $self->{_tag_if_close}) {
             $b->[2] = 2;
         } else {
             $b->[2] = 99;
@@ -1257,15 +1359,19 @@ sub _if_rules_from_tokens {
     my $nested = 0;
     my @tmp;
 
+    my $tif_tag = $self->{_tag_if};
+    my $tifc_tag = $self->{_tag_if_close};
+    my $tif_prefix = $self->{open_delim} . 'if';
+
     for my $i (0 .. $num - 1) {
         my $item = $toks->[$i];
-        if ($item =~ /^\{if/) { $nested++ }
-        if ($item eq '{/if}') { $nested-- }
+        if (index($item, $tif_prefix) == 0) { $nested++ }
+        if ($item eq $tifc_tag) { $nested-- }
 
         my $yes = 0;
         if ($nested == 1) {
             $yes = $self->is_if_token($item) || 0;
-            $yes = 0 if $item eq '{/if}';
+            $yes = 0 if $item eq $tifc_tag;
         }
         $tmp[$i] = $yes;
     }
@@ -1294,7 +1400,7 @@ sub _if_rules_from_tokens {
     }
 
     if (@conds != @payloads) {
-        $self->_error_out("Error parsing {if} conditions in '$str'", 95320);
+        $self->_error_out("Error parsing if conditions in '$str'", 95320);
     }
 
     my @ret;
