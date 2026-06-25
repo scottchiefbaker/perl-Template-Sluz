@@ -24,7 +24,7 @@ use autouse 'Carp' => qw(croak);
 
 use constant SLUZ_INLINE => 'INLINE_TEMPLATE';
 
-our $VERSION = 'v0.9.4';
+our $VERSION = 'v0.9.5';
 
 ################################################################################
 # Built-in Sluz functions that can be used in templates
