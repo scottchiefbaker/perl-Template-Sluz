@@ -1331,6 +1331,10 @@ sub _get_char_location {
 
     if ($self->{inc_tpl_file}) { $tpl_file = $self->{inc_tpl_file} }
 
+    # Guard: no file context (e.g. parse_string) — skip _get_tpl_content
+    # to avoid trying to open the perl_file_dir directory as a template file
+    if (!length $tpl_file) { return (-1, -1, $tpl_file) }
+
     my $str = $self->_get_tpl_content($tpl_file);
     if ($pos < 0 || !defined $str) { return (-1, -1, $tpl_file) }
 
