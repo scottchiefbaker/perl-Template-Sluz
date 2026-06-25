@@ -445,7 +445,7 @@ sub _get_tpl_content {
 
     if ($tf) {
         local $/;
-        open my $fh, '<', $tf or $self->_error_out("Cannot open <code>$tf</code>: $!", 42280);
+        open my $fh, '<', $tf or $self->_error_out("Cannot open <code>$tf</code>: $!", 13983);
         my $str = <$fh>;
         close $fh;
         return $str // '';
@@ -1124,7 +1124,7 @@ sub _include_block {
     }
 
     local $/;
-    open my $fh, '<', $inc_tpl or $self->_error_out("Cannot open <code>$inc_tpl</code>: $!", 18485);
+    open my $fh, '<', $inc_tpl or $self->_error_out("Cannot open <code>$inc_tpl</code>: $!", 63579);
     my $content = <$fh>;
     close $fh;
 
