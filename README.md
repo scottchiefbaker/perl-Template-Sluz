@@ -44,15 +44,6 @@ Info: red / 39
     my $sluz = Template::Sluz->new();
     ```
 
-    Options (all are optional):
-
-    ```perl
-    my $sluz = Template::Sluz->new(
-        auto_escape => 1,   # auto HTML-escape all variable output
-        debug       => 1,   # enable debug mode (currently unused)
-    );
-    ```
-
 - **assign**
 
     Assign template variables.

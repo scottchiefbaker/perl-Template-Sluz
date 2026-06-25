@@ -1475,13 +1475,6 @@ Create a new Template::Sluz instance.
 
     my $sluz = Template::Sluz->new();
 
-Options (all are optional):
-
-    my $sluz = Template::Sluz->new(
-        auto_escape => 1,   # auto HTML-escape all variable output
-        debug       => 1,   # enable debug mode (currently unused)
-    );
-
 =item B<assign>
 
 Assign template variables.
