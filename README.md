@@ -172,9 +172,9 @@ All template syntax works the same way with alternate delimiters:
     Not adult
 </if>
 
-{foreach $items as $item}
+<foreach $items as $item>
     <$item>
-{/foreach}
+</foreach>
 ```
 
 This is useful when your template content contains curly braces that would
