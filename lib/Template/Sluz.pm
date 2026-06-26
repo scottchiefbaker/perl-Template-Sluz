@@ -397,6 +397,11 @@ sub _precompute_tags {
     # Precompiled simple if regex (no else/elseif)
     $self->{_re_if_simple} = qr/\Q$o\Eif (.+?)\Q$c\E(.+)\Q$o\E\/if\Q$c\E/s;
 
+    # Precomputed ord values for fast single-character delimiter checks
+    $self->{_od_ord}      = ord($o);
+    $self->{_cd_ord}      = ord($c);
+    $self->{_dollar_ord}  = ord('$');
+
     return;
 }
 
@@ -611,8 +616,8 @@ sub _process_blocks {
     my $blocks = shift;
     my $out    = shift;  # Optional: ref to append output to (avoids temp string + concat)
 
-    my $od = $self->{open_delim};
-    my $cd = $self->{close_delim};
+    my $od_ord = $self->{_od_ord};
+    my $od     = $self->{open_delim};
     my $var_tag = "${od}\$";
     my $var_re  = $self->{_re_var_simple};
 
@@ -620,8 +625,7 @@ sub _process_blocks {
         for my $x (@$blocks) {
             my $block = $x->[0];
             next unless length $block;
-            my $first = substr($block, 0, 1);
-            if ($first ne $od) {
+            if (ord($block) != $od_ord) {
                 $$out .= $block;
                 next;
             }
@@ -650,8 +654,7 @@ sub _process_blocks {
     for my $x (@$blocks) {
         my $block = $x->[0];
         next unless length $block;
-        my $first = substr($block, 0, 1);
-        if ($first ne $od) {
+        if (ord($block) != $od_ord) {
             $html .= $block;
             next;
         }
@@ -690,8 +693,8 @@ sub _process_block {
 
     $self->{char_pos} = $char_pos;
 
-    my $od = $self->{open_delim};
-    my $cd = $self->{close_delim};
+    my $od     = $self->{open_delim};
+    my $cd_ord = $self->{_cd_ord};
 
     # 1. Variable block {$foo} or {$foo|modifier}
     if (substr($str, 0, 2) eq "${od}\$" && $str =~ $self->{_re_var_full}) {
@@ -725,7 +728,7 @@ sub _process_block {
     }
 
     # 7. Unclosed tag
-    if (substr($str, -1) ne $cd) {
+    if (ord(substr($str, -1)) != $cd_ord) {
         my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
         $self->_error_out("Unclosed tag <code>$str</code> in <code>$file</code> on line #$line", 45821);
     }
@@ -905,14 +908,14 @@ sub _foreach_block {
 
     # Pre-classify blocks for fast dispatch in the loop (cached in block arrays)
     # type: -1=empty, 0=text, 1=simple_var, 2=if_block, 99=other
-    my $od = $self->{open_delim};
-    my $cd = $self->{close_delim};
+    my $od     = $self->{open_delim};
+    my $od_ord = $self->{_od_ord};
     for my $b (@blocks) {
         next if defined $b->[2];
         my $bs = $b->[0];
         if (!length $bs) {
             $b->[2] = -1;
-        } elsif (substr($bs, 0, 1) ne $od) {
+        } elsif (ord($bs) != $od_ord) {
             $b->[2] = 0;
         } elsif (substr($bs, 0, 2) eq "${od}\$" && index($bs, '|') < 0
                  && $bs =~ $self->{_re_var_simple}) {
@@ -1217,33 +1220,25 @@ sub _micro_optimize {
     if ($str =~ /^-?\d+(?:\.\d+)?$/) { return $str }
 
     if (!length $str) { return undef }
-    my $first = substr($str, 0, 1);
-    my $last  = substr($str, -1);
+    my $first = ord($str);
+    my $last  = ord(substr($str, -1));
 
-    if ($first eq "'" && $last eq "'") {
+    if ($first == 39 && $last == 39) {
         my $tmp = substr($str, 1, length($str) - 2);
         if (index($tmp, "'") < 0) { return $tmp }
     }
 
-    if ($first eq '"' && $last eq '"') {
+    if ($first == 34 && $last == 34) {
         my $tmp = substr($str, 1, length($str) - 2);
         if (index($tmp, '$') < 0 && index($tmp, '"') < 0) { return $tmp }
     }
 
-    if ($str =~ /^\$__S->\{sluz_pfx_(\w+)\}$/) {
-        if (exists $self->{tpl_vars}{$1}) { return $self->{tpl_vars}{$1} }
+    if ($str =~ /^(!?)\$__S->\{sluz_pfx_(\w+)\}$/ && exists $self->{tpl_vars}{$2}) {
+        return $1 ? !$self->{tpl_vars}{$2} : $self->{tpl_vars}{$2};
     }
 
-    if ($str =~ /^!\$__S->\{sluz_pfx_(\w+)\}$/) {
-        if (exists $self->{tpl_vars}{$1}) { return !$self->{tpl_vars}{$1} }
-    }
-
-    if ($str =~ /^(\w+)$/ && exists $self->{tpl_vars}{$1}) {
-        return $self->{tpl_vars}{$1};
-    }
-
-    if ($str =~ /^!(\w+)$/ && exists $self->{tpl_vars}{$1}) {
-        return !$self->{tpl_vars}{$1};
+    if ($str =~ /^(!?)(\w+)$/ && exists $self->{tpl_vars}{$2}) {
+        return $1 ? !$self->{tpl_vars}{$2} : $self->{tpl_vars}{$2};
     }
 
     return undef;
