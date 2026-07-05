@@ -80,6 +80,7 @@ sub new {
         _blocks_cache       => {}, # Cached _get_blocks results (avoids re-tokenizing if payloads in loops)
         _if_rules_cache     => {}, # Cached parsed {if} rules (avoids re-parsing same if block in loops)
         _verified_sub_cache => {}, # Cached subs that succeeded once — skip eval/SIG overhead
+        _mod_cache          => {}, # Cached resolved modifier coderefs keyed by func name
     };
 
     bless $self, $class;
@@ -203,6 +204,7 @@ sub set_delimiters {
     $self->{_convert_cache}      = {};
     $self->{_sub_cache}          = {};
     $self->{_verified_sub_cache} = {};
+    $self->{_mod_cache}          = {};
 
     return;
 }
@@ -401,6 +403,10 @@ sub _precompute_tags {
     $self->{_od_ord}      = ord($o);
     $self->{_cd_ord}      = ord($c);
     $self->{_dollar_ord}  = ord('$');
+
+    # Precompiled modifier-split regexes (avoids per-modifier-call recompile)
+    $self->{_pipe_re}  = qr/\|(?![^"]*"(?:(?:[^"]*"){2})*[^"]*$)(?![^']*'(?:(?:[^']*'){2})*[^']*$)/;
+    $self->{_comma_re} = qr/,(?=(?:[^"]*"[^"]*")*[^"]*$)(?=(?:[^']*'[^']*')*[^']*$)/;
 
     return;
 }
@@ -642,7 +648,15 @@ sub _process_blocks {
                 }
                 if (ref $val eq 'ARRAY')  { $$out .= 'ARRAY' }
                 elsif (ref $val eq 'HASH') { $$out .= 'HASH' }
-                elsif (defined $val)       { $$out .= $self->_esc($val) }
+                elsif (defined $val)       { $$out .= ($self->{auto_escape} ? escape($val) : $val) }
+                next;
+            }
+            # If block fast path — skip _process_block dispatch (mirrors
+            # the $html branch so the $out path is equally fast).
+            if (substr($block, 0, $self->{_tag_if_len}) eq $self->{_tag_if}
+                && substr($block, -$self->{_tag_if_close_len}) eq $self->{_tag_if_close}) {
+                $self->{char_pos} = $x->[1];
+                $$out .= $self->_if_block($block);
                 next;
             }
             $$out .= $self->_process_block($block, $x->[1]);
@@ -670,7 +684,7 @@ sub _process_blocks {
             }
             if (ref $val eq 'ARRAY')  { $html .= 'ARRAY' }
             elsif (ref $val eq 'HASH') { $html .= 'HASH' }
-            elsif (defined $val)       { $html .= $self->_esc($val) }
+            elsif (defined $val)       { $html .= ($self->{auto_escape} ? escape($val) : $val) }
             next;
         }
         # If block fast path — skip _process_block dispatch
@@ -757,7 +771,7 @@ sub _variable_block {
         }
         if (ref $ret eq 'ARRAY') { return 'ARRAY' }
         if (ref $ret eq 'HASH')  { return 'HASH' }
-        if (defined $ret) { return $self->_esc($ret) }
+        if (defined $ret) { return ($self->{auto_escape} ? escape($ret) : $ret) }
         return '';
     }
 
@@ -776,19 +790,20 @@ sub _variable_block {
             if (defined $ret) { return $ret }
             return '';
         } elsif (!$is_nothing && $is_default) {
-            return $self->array_dive($key, $self->{tpl_vars}) // '';
+            return $tmp // '';
         } else {
             if ($is_nothing) {
                 return '';
             }
-            my $pre = $self->array_dive($key, $self->{tpl_vars}) // '';
+            my $pre = $tmp;
 
             my $seen_escape   = 0;
 			my $seen_noescape = 0;
 
             # Split on | not inside double or single quotes (supports chained
-            # modifiers like {$x|uc|substr:0,3})
-            my $pipe_re = qr/\|(?![^"]*"(?:(?:[^"]*"){2})*[^"]*$)(?![^']*'(?:(?:[^']*'){2})*[^']*$)/;
+            # modifiers like {$x|uc|substr:0,3}). Regex precompiled in
+            # _precompute_tags to avoid per-call recompile cost.
+            my $pipe_re = $self->{_pipe_re};
             for my $m_part (split $pipe_re, $mod) {
                 my @x    = split /:/, $m_part, 2;
                 my $func = $x[0] // '';
@@ -800,41 +815,39 @@ sub _variable_block {
                 if (length $param_str) {
                     # Split on commas not inside double or single quotes
                     # (parameter separator in modifier calls like substr:2,2)
-                    my $comma_re = qr/,(?=(?:[^"]*"[^"]*")*[^"]*$)(?=(?:[^']*'[^']*')*[^']*$)/;
                     my @new = map {
                         my ($v) = $self->_peval($_);
                         $v;
-                    } split $comma_re, $param_str;
+                    } split $self->{_comma_re}, $param_str;
                     push @params, @new;
                 }
 
-                {
+                # Resolve the modifier coderef once per func name and cache it.
+                # Priority: main::, current package (Template::Sluz built-ins),
+                # then CORE:: built-in operators.
+                my $cref = $self->{_mod_cache}{$func};
+                if (!defined $cref) {
                     no strict 'refs';
-
-					# Priority: main::, Template::Sluz built-ins, then CORE::
-                    my $callable = defined &{"main::$func"} || defined &{$func} || defined &{"CORE::$func"};
-
-                    if (!$callable) {
-                        my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-                        $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
-                    }
-
-                    if (defined &{"main::$func"}) {
-                        $pre = eval { &{"main::$func"}(@params) };
-                    } elsif (defined &{$func}) {
-                        $pre = eval { &{$func}(@params) };
-                    } else {
-                        $pre = eval { &{"CORE::$func"}(@params) };
-                    }
+                    if    (defined &{"main::$func"}) { $cref = \&{"main::$func"} }
+                    elsif (defined &{$func})         { $cref = \&{$func} }
+                    elsif (defined &{"CORE::$func"}) { $cref = \&{"CORE::$func"} }
+                    else                            { $cref = 0 }
+                    $self->{_mod_cache}{$func} = $cref;
                 }
 
+                if (!$cref) {
+                    my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+                    $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
+                }
+
+                $pre = eval { $cref->(@params) };
                 if ($@) {
                     $self->_error_out("Exception: $@", 79134);
                 }
             }
 
             if ($self->{auto_escape} && !$seen_noescape && !$seen_escape) {
-                return $self->_esc($pre);
+                return escape($pre);
             }
             return $pre;
         }
@@ -843,7 +856,7 @@ sub _variable_block {
     my $ret = $self->array_dive($str, $self->{tpl_vars});
     if (ref $ret eq 'ARRAY') { return 'ARRAY' }
     if (ref $ret eq 'HASH')  { return 'HASH' }
-    if (defined $ret) { return $self->_esc($ret) }
+    if (defined $ret) { return ($self->{auto_escape} ? escape($ret) : $ret) }
     return '';
 }
 
@@ -884,10 +897,12 @@ sub _if_block {
         my $payload = $rule->[1];
         my ($res) = $self->_peval($test);
         if ($res) {
-            # Inline _get_blocks for cached payloads
+            # Inline _get_blocks for cached payloads. Pass \$ret to
+            # _process_blocks so it appends directly — avoids a temp
+            # string allocation + concat per if-payload render.
             my $cached = $self->{_blocks_cache}{$payload};
             my @in_blocks = $cached ? @$cached : $self->_get_blocks($payload);
-            $ret .= $self->_process_blocks(\@in_blocks);
+            $self->_process_blocks(\@in_blocks, \$ret);
             last;
         }
     }
@@ -1012,7 +1027,7 @@ sub _foreach_block {
                     }
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                    elsif (defined $val)       { $ret .= $self->_esc($val) }
+                    elsif (defined $val)       { $ret .= ($self->{auto_escape} ? escape($val) : $val) }
                 } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
@@ -1065,7 +1080,7 @@ sub _foreach_block {
                     }
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                    elsif (defined $val)       { $ret .= $self->_esc($val) }
+                    elsif (defined $val)       { $ret .= ($self->{auto_escape} ? escape($val) : $val) }
                 } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
