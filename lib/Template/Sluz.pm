@@ -581,7 +581,7 @@ sub _get_blocks {
             }
 
             $start = $after;
-            $i = $start;
+            $i = $start - 1;
         }
     }
 
