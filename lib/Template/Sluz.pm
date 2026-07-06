@@ -436,9 +436,18 @@ sub _get_tpl_content {
     }
 
     if ($tpl_file eq SLUZ_INLINE) {
-        my $c = $self->_get_inline_content($self->{perl_file});
-        if (defined $c) { return $c }
+        my ($c, $line_offset) = $self->_get_inline_content($self->{perl_file});
+        if (defined $c) {
+            $self->{tpl_file_display} = $self->{perl_file};
+            $self->{tpl_line_offset}  = $line_offset;
+            return $c;
+        }
+        delete $self->{tpl_file_display};
+        delete $self->{tpl_line_offset};
         return '';
+    } else {
+        delete $self->{tpl_file_display};
+        delete $self->{tpl_line_offset};
     }
 
     if ($tf && !-r $tf) {
@@ -465,7 +474,9 @@ sub _get_inline_content {
     close $fh;
     my $idx = index($str, '__DATA__');
     if ($idx < 0) { return undef }
-    return substr($str, $idx + 9);
+    my $before = substr($str, 0, $idx + 9);
+    my $line_offset = $before =~ tr/\n//;
+    return (substr($str, $idx + 9), $line_offset);
 }
 
 # -------------------------------------------------------------------
@@ -742,7 +753,8 @@ sub _process_block {
 
     # 7. Unclosed tag
     if (ord(substr($str, -1)) != $cd_ord) {
-        my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+        my $tag_start = $self->{char_pos} - length($str);
+        my ($line, $col, $file) = $self->_get_char_location($tag_start, $self->{tpl_file});
         $self->_error_out("Unclosed tag <code>$str</code> in <code>$file</code> on line #$line", 45821);
     }
 
@@ -1340,12 +1352,16 @@ sub _get_char_location {
 
     if ($self->{inc_tpl_file}) { $tpl_file = $self->{inc_tpl_file} }
 
+    # Use display file name and line offset when available (e.g. inline DATA templates)
+    my $display_file = exists $self->{tpl_file_display} ? $self->{tpl_file_display} : $tpl_file;
+    my $line_offset  = exists $self->{tpl_line_offset}  ? $self->{tpl_line_offset}  : 0;
+
     # Guard: no file context (e.g. parse_string) — skip _get_tpl_content
     # to avoid trying to open the perl_file_dir directory as a template file
-    if (!length $tpl_file) { return (-1, -1, $tpl_file) }
+    if (!length $tpl_file) { return (-1, -1, $display_file) }
 
     my $str = $self->_get_tpl_content($tpl_file);
-    if ($pos < 0 || !defined $str) { return (-1, -1, $tpl_file) }
+    if ($pos < 0 || !defined $str) { return (-1, -1, $display_file) }
 
     my $line = 1;
     my $col  = 0;
@@ -1355,11 +1371,11 @@ sub _get_char_location {
             $line++;
             $col = 0;
         }
-        if ($pos == $i) { return ($line, $col, $tpl_file) }
+        if ($pos == $i) { return ($line + $line_offset, $col, $display_file) }
     }
 
-    if ($pos == length $str) { return ($line, $col, $tpl_file) }
-    return (-1, -1, $tpl_file);
+    if ($pos == length $str) { return ($line + $line_offset, $col, $display_file) }
+    return (-1, -1, $display_file);
 }
 
 sub _extract_include_file {
