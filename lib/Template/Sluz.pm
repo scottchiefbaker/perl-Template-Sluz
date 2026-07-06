@@ -1453,6 +1453,9 @@ sub _if_rules_from_tokens {
 
     my @ret;
     push @ret, [$conds[$_], $payloads[$_]] for 0 .. $#conds;
+    for my $rule (@ret) {
+        $rule->[1] = $self->ltrim_one($rule->[1], "\n");
+    }
     return @ret;
 }
 
