@@ -572,7 +572,15 @@ sub _get_blocks {
                 my ($line, $col, $file) = $self->_get_char_location($i, $self->{tpl_file});
                 $self->_error_out("Missing closing <code>$self->{_tag_comment_close}</code> for comment in <code>$file</code> on line #$line", 48724);
             }
-            $start += $end + length($self->{_tag_comment_close});
+            my $after = $start + $end + length($self->{_tag_comment_close});
+
+            my $pre_nl  = ($i == 0 || substr($str, $i - 1, 1) eq "\n");
+            my $post_nl = ($after >= $slen || substr($str, $after, 1) eq "\n");
+            if ($pre_nl && $post_nl && $after < $slen) {
+                $after++;
+            }
+
+            $start = $after;
             $i = $start;
         }
     }
