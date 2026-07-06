@@ -32,5 +32,9 @@ sluz_test($sluz, "{* x *}\nafter", "after",
     'Comment #11 - First line is comment');
 sluz_test($sluz, "before\n{* x *}", "before\n",
     'Comment #12 - Last line is comment');
+sluz_test($sluz, "a\n{* x *}\n{* y *}\nb", "a\nb",
+    'Comment #13 - Two consecutive comment-only lines');
+sluz_test($sluz, "{* a *}\n{* b *}\n", "",
+    'Comment #14 - Two consecutive comments with trailing newline');
 
 done_testing();
