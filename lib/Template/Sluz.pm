@@ -115,16 +115,12 @@ sub assign {
 
 sub fetch {
     my $self     = shift;
-    my $tpl_file = shift || '';
+    my $tpl_file = shift // SLUZ_INLINE;
     my $parent   = shift;
 
     if (!$self->{perl_file}) {
         $self->{perl_file}     = $self->_get_perl_file;
         $self->{perl_file_dir} = dirname($self->{perl_file});
-    }
-
-    if (!$tpl_file) {
-        $tpl_file = $self->_guess_tpl_file($self->{perl_file});
     }
 
     my $parent_tpl;
@@ -133,6 +129,7 @@ sub fetch {
     } else {
         $parent_tpl = $self->{parent_tpl};
     }
+
     if ($parent_tpl) {
         $self->assign('__CHILD_TPL', $tpl_file);
         $tpl_file = $parent_tpl;
@@ -424,16 +421,6 @@ sub _get_perl_file {
     return $file || __FILE__;
 }
 
-sub _guess_tpl_file {
-    my $self  = shift;
-    my $pfile = shift;
-
-    my $base = basename($pfile);
-    $base    =~ s/\.(pl|pm)$/.stpl/;
-
-    return "tpls/$base";
-}
-
 sub _get_tpl_content {
     my $self     = shift;
     my $tpl_file = shift // '';
@@ -442,6 +429,10 @@ sub _get_tpl_content {
 
     if ($self->{perl_file_dir}) {
         $tf = $self->{perl_file_dir} . "/$tf";
+    }
+
+    if (!length($tpl_file)) {
+        $self->_error_out("Template file name is empty", 86801);
     }
 
     if ($tpl_file eq SLUZ_INLINE) {
