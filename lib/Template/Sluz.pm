@@ -572,9 +572,40 @@ sub _get_blocks {
                 }
             }
 
-            if (length $block) { push @blocks, [$block, $i] }
-            $start += length($block);
-            $i = $start;
+            # A {literal} block that sits alone on its own line (the
+            # {literal} and {/literal} tags each occupy a line of their
+            # own) should not emit the \n belonging to those tag lines.
+            # This mirrors the comment-line handling below.
+            my $orig_block_len = length($block);
+
+            if ($matched_block && $matched_block eq 'literal') {
+                my $ltag  = $self->{_tag_literal};
+                my $rtag  = $self->{_tag_literal_close};
+                my $l_len = $self->{_tag_literal_len};
+                my $r_len = $self->{_tag_literal_close_len};
+                my $inner = substr($block, $l_len, length($block) - $l_len - $r_len);
+
+                my $begins_line = ($start == 0) || substr($str, $start - 1, 1) eq "\n";
+                my $after_pos   = $start + length($block);
+                my $ends_line   = ($after_pos >= $slen) || substr($str, $after_pos, 1) eq "\n";
+
+                if ($begins_line && length($inner) && substr($inner, 0, 1) eq "\n") {
+                    $inner = substr($inner, 1);
+                }
+
+                if ($ends_line && length($inner) && substr($inner, -1) eq "\n") {
+                    $inner = substr($inner, 0, -1);
+                }
+
+                $block = $ltag . $inner . $rtag;
+            }
+
+            if (length($block)) {
+				push @blocks, [$block, $i]
+			}
+
+            $start += $orig_block_len;
+            $i      = $start;
         }
 
         if ($is_comment) {
