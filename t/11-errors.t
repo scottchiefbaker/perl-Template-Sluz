@@ -1,0 +1,85 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use 5.016;
+
+use Test::More;
+use FindBin;
+require "$FindBin::Bin/test_setup.pl";
+
+# -------------------------------------------------------------------
+# Error-code coverage — every _error_out path in the module.
+# Codes already exercised elsewhere: #18956, #45821, #73467, #18933
+# -------------------------------------------------------------------
+
+# set_delimiters validation (errors #51234 / #51235 / #51236)
+{
+    my $s = Template::Sluz->new();
+    eval { $s->set_delimiters() };
+    like($@, qr/#51234/, 'Err #51234 - set_delimiters missing args');
+
+    eval { $s->set_delimiters('<') };
+    like($@, qr/#51234/, 'Err #51234 - set_delimiters single arg');
+
+    eval { $s->set_delimiters('<<', '>') };
+    like($@, qr/#51235/, 'Err #51235 - delimiter longer than one char');
+
+    eval { $s->set_delimiters('<', '<') };
+    like($@, qr/#51236/, 'Err #51236 - open/close delimiters identical');
+}
+
+# #86801 - empty template file name to fetch()
+{
+    my $s = Template::Sluz->new();
+    eval { $s->fetch('') };
+    like($@, qr/#86801/, 'Err #86801 - empty template filename');
+}
+
+# #42280 - unreadable template file to fetch()
+{
+    my $s = Template::Sluz->new();
+    $s->{perl_file_dir} = "$FindBin::Bin";
+    # Pin perl_file so fetch() does not recompute perl_file_dir from caller
+    $s->{perl_file} = "$FindBin::Bin/01-main.t";
+    eval { $s->fetch('no_such_template.stpl') };
+    like($@, qr/#42280/, 'Err #42280 - template file cannot be loaded');
+}
+
+# #48724 - unterminated comment
+{
+    my $s = setup_sluz();
+    eval { $s->parse_string('{* unterminated comment ') };
+    like($@, qr/#48724/, 'Err #48724 - missing closing comment tag');
+}
+
+# #47204 - unknown modifier function
+{
+    my $s = setup_sluz();
+    eval { $s->parse_string('{$first|bogus_modifier_xyz}') };
+    like($@, qr/#47204/, 'Err #47204 - unknown modifier function');
+}
+
+# #79134 - exception thrown inside a modifier
+{
+    my $s = setup_sluz();
+    no strict 'refs';
+    *{'main::sluz_die'} = sub { die "boom from modifier" };
+    eval { $s->parse_string('{$first|sluz_die}') };
+    like($@, qr/#79134/, 'Err #79134 - exception inside modifier eval');
+}
+
+# #18485 - include target file missing
+{
+    my $s = setup_sluz();
+    eval { $s->parse_string("{include file='no_such_include.stpl'}") };
+    like($@, qr/#18485/, 'Err #18485 - include template cannot be loaded');
+}
+
+# #68493 - include block with no resolvable file
+{
+    my $s = setup_sluz();
+    eval { $s->parse_string("{include foo='bar'}") };
+    like($@, qr/#68493/, 'Err #68493 - no file found in include block');
+}
+
+done_testing();
