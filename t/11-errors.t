@@ -82,4 +82,35 @@ require "$FindBin::Bin/test_setup.pl";
     like($@, qr/#68493/, 'Err #68493 - no file found in include block');
 }
 
+# #50981 - whitespace immediately inside a tag delimiter (any side)
+{
+    my $s = setup_sluz();
+
+    eval { $s->parse_string('{ $foo}') };
+    like($@, qr/#50981/, 'Err #50981 - whitespace after open delimiter');
+
+    eval { $s->parse_string('{$foo }') };
+    like($@, qr/#50981/, 'Err #50981 - whitespace before close delimiter');
+
+    eval { $s->parse_string('{ $foo }') };
+    like($@, qr/#50981/, 'Err #50981 - whitespace on BOTH sides is an error');
+
+    eval { $s->parse_string('{ $foo|upper}') };
+    like($@, qr/#50981/, 'Err #50981 - whitespace after open delimiter with modifier');
+
+    eval { $s->parse_string('{$foo|upper }') };
+    like($@, qr/#50981/, 'Err #50981 - whitespace before close delimiter with modifier');
+}
+
+# #50981 - whitespace next to delimiter: text containing braces is exempt
+{
+    my $s = setup_sluz();
+
+    my $out = $s->parse_string('function(foo) { $i = 10; }');
+    is($out, 'function(foo) { $i = 10; }', 'Brace-containing text is left untouched');
+
+    $out = $s->parse_string('foo() { bar }');
+    is($out, 'foo() { bar }', 'Function-body-like text is left untouched');
+}
+
 done_testing();
