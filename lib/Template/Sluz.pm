@@ -572,6 +572,31 @@ sub _get_blocks {
                 }
             }
 
+            # Whitespace immediately inside the delimiters on EITHER side
+            # is a syntax error #50981, since a tag must hug its delimiters
+            # (e.g. "{ $foo}", "{$foo }", "{ $foo }"). Only genuine template
+            # tags are subject to this rule. A block whose inner content
+            # contains '{', '}' or ';' is literal text (e.g. a JS snippet
+            # "function(foo) { $i = 10; }") and is left alone. Comment
+            # blocks ({* ... *}) are exempt too.
+            if (length($block) >= 3
+                && index($block, $self->{_tag_comment_open}) != 0) {
+                my $inner = substr($block, 1, length($block) - 2);
+                if ($inner !~ /[{};]/) {
+                    my $inner_first = substr($block, 1, 1);
+                    my $inner_last  = substr($block, length($block) - 2, 1);
+                    my $lead_ws = ($inner_first =~ /\s/);
+                    my $tail_ws = ($inner_last  =~ /\s/);
+                    if ($lead_ws || $tail_ws) {
+                        my ($line, $col, $file) = $self->_get_char_location($start, $self->{tpl_file});
+                        $self->_error_out(
+                            "Whitespace next to delimiter in tag <code>$block</code> in <code>$file</code> on line #$line",
+                            50981
+                        );
+                    }
+                }
+            }
+
             # A {literal} block that sits alone on its own line (the
             # {literal} and {/literal} tags each occupy a line of their
             # own) should not emit the \n belonging to those tag lines.
