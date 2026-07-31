@@ -81,6 +81,7 @@ sub new {
         _if_rules_cache     => {}, # Cached parsed {if} rules (avoids re-parsing same if block in loops)
         _verified_sub_cache => {}, # Cached subs that succeeded once — skip eval/SIG overhead
         _mod_cache          => {}, # Cached resolved modifier coderefs keyed by func name
+        _micro_cache        => {}, # Cached _micro_optimize shape classification (skips regex on repeat calls)
     };
 
     bless $self, $class;
@@ -933,16 +934,15 @@ sub _if_block {
     my $self = shift;
     my $str  = shift;
 
-    my @rules;
-    if (exists $self->{_if_rules_cache}{$str}) {
-        @rules = @{$self->{_if_rules_cache}{$str}};
-    } else {
+    my $rules = $self->{_if_rules_cache}{$str};
+    if (!$rules) {
         my $od = $self->{open_delim};
         my $cd = $self->{close_delim};
         my $isimple_start = length($od) + 1;
         my $else_check = $od . 'else';
         my $is_simple = index($str, $else_check, $isimple_start) < 0;
 
+        my @rules;
         if ($is_simple) {
             $str =~ $self->{_re_if_simple};
             my $cond    = $1 // '';
@@ -954,24 +954,25 @@ sub _if_block {
             @rules   = $self->_if_rules_from_tokens(\@toks);
         }
 
-        $self->{_if_rules_cache}{$str} = \@rules;
+        $rules = \@rules;
+        $self->{_if_rules_cache}{$str} = $rules;
     }
 
     my $ret = '';
-    for my $rule (@rules) {
+    for my $rule (@$rules) {
         my $raw = $rule->[0];
         # Inline _convert_vars for cached expressions — saves method call per iteration
         my $test = (index($raw, '$') < 0) ? $raw :
                    ($self->{_convert_cache}{$raw} // $self->_convert_vars($raw));
-        my $payload = $rule->[1];
         my ($res) = $self->_peval($test);
         if ($res) {
+            my $payload = $rule->[1];
             # Inline _get_blocks for cached payloads. Pass \$ret to
             # _process_blocks so it appends directly — avoids a temp
             # string allocation + concat per if-payload render.
             my $cached = $self->{_blocks_cache}{$payload};
-            my @in_blocks = $cached ? @$cached : $self->_get_blocks($payload);
-            $self->_process_blocks(\@in_blocks, \$ret);
+            my $in_blocks = $cached ? $cached : [$self->_get_blocks($payload)];
+            $self->_process_blocks($in_blocks, \$ret);
             last;
         }
     }
@@ -1057,29 +1058,36 @@ sub _foreach_block {
     my @ks_exists  = map { exists $self->{__S}{$_} } @ks_keys;
     my @ks_vals    = map { $self->{__S}{$_} } @ks_keys;
 
+    # Local refs to avoid repeated $self->{...} hash deref in hot loops
+    my $tv          = $self->{tpl_vars};
+    my $ks          = $self->{__S};
+    my $auto_escape = $self->{auto_escape};
+
     if (ref $src eq 'ARRAY') {
         my $last = $#$src;
         for my $i (0 .. $last) {
             if ($need_first) {
-                $self->{tpl_vars}{__FOREACH_FIRST} = ($idx == 0) ? 1 : 0;
-                $self->{__S}{$first_ks} = ($idx == 0) ? 1 : 0;
+                my $v = ($idx == 0) ? 1 : 0;
+                $tv->{__FOREACH_FIRST} = $v;
+                $ks->{$first_ks}       = $v;
             }
             if ($need_last) {
-                $self->{tpl_vars}{__FOREACH_LAST} = ($idx == $last) ? 1 : 0;
-                $self->{__S}{$last_ks} = ($idx == $last) ? 1 : 0;
+                my $v = ($idx == $last) ? 1 : 0;
+                $tv->{__FOREACH_LAST} = $v;
+                $ks->{$last_ks}       = $v;
             }
             if ($need_index) {
-                $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
-                $self->{__S}{$index_ks} = $idx;
+                $tv->{__FOREACH_INDEX} = $idx;
+                $ks->{$index_ks}       = $idx;
             }
             if (defined $oval) {
-                $self->{tpl_vars}{$okey} = $i;
-                $self->{tpl_vars}{$oval} = $src->[$i];
-                $self->{__S}{$okey_ks} = $i;
-                $self->{__S}{$oval_ks} = $src->[$i];
+                $tv->{$okey} = $i;
+                $tv->{$oval} = $src->[$i];
+                $ks->{$okey_ks} = $i;
+                $ks->{$oval_ks} = $src->[$i];
             } else {
-                $self->{tpl_vars}{$okey} = $src->[$i];
-                $self->{__S}{$okey_ks} = $src->[$i];
+                $tv->{$okey} = $src->[$i];
+                $ks->{$okey_ks} = $src->[$i];
             }
             # Inline block processing with pre-classified types — no substr/regex per iteration
             for my $b (@blocks) {
@@ -1090,13 +1098,13 @@ sub _foreach_block {
                     my $var = $b->[3];
                     my $val;
                     if (index($var, '.') < 0) {
-                        $val = $self->{tpl_vars}{$var};
+                        $val = $tv->{$var};
                     } else {
-                        $val = $self->array_dive($var, $self->{tpl_vars});
+                        $val = $self->array_dive($var, $tv);
                     }
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                    elsif (defined $val)       { $ret .= ($self->{auto_escape} ? escape($val) : $val) }
+                    elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
                 } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
@@ -1114,25 +1122,27 @@ sub _foreach_block {
         for my $i (0 .. $last) {
             my $k = $keys[$i];
             if ($need_first) {
-                $self->{tpl_vars}{__FOREACH_FIRST} = ($idx == 0) ? 1 : 0;
-                $self->{__S}{$first_ks} = ($idx == 0) ? 1 : 0;
+                my $v = ($idx == 0) ? 1 : 0;
+                $tv->{__FOREACH_FIRST} = $v;
+                $ks->{$first_ks}       = $v;
             }
             if ($need_last) {
-                $self->{tpl_vars}{__FOREACH_LAST} = ($idx == $last) ? 1 : 0;
-                $self->{__S}{$last_ks} = ($idx == $last) ? 1 : 0;
+                my $v = ($idx == $last) ? 1 : 0;
+                $tv->{__FOREACH_LAST} = $v;
+                $ks->{$last_ks}       = $v;
             }
             if ($need_index) {
-                $self->{tpl_vars}{__FOREACH_INDEX} = $idx;
-                $self->{__S}{$index_ks} = $idx;
+                $tv->{__FOREACH_INDEX} = $idx;
+                $ks->{$index_ks}       = $idx;
             }
             if (defined $oval) {
-                $self->{tpl_vars}{$okey} = $k;
-                $self->{tpl_vars}{$oval} = $src->{$k};
-                $self->{__S}{$okey_ks} = $k;
-                $self->{__S}{$oval_ks} = $src->{$k};
+                $tv->{$okey} = $k;
+                $tv->{$oval} = $src->{$k};
+                $ks->{$okey_ks} = $k;
+                $ks->{$oval_ks} = $src->{$k};
             } else {
-                $self->{tpl_vars}{$okey} = $src->{$k};
-                $self->{__S}{$okey_ks} = $src->{$k};
+                $tv->{$okey} = $src->{$k};
+                $ks->{$okey_ks} = $src->{$k};
             }
             # Inline block processing with pre-classified types — no substr/regex per iteration
             for my $b (@blocks) {
@@ -1143,13 +1153,13 @@ sub _foreach_block {
                     my $var = $b->[3];
                     my $val;
                     if (index($var, '.') < 0) {
-                        $val = $self->{tpl_vars}{$var};
+                        $val = $tv->{$var};
                     } else {
-                        $val = $self->array_dive($var, $self->{tpl_vars});
+                        $val = $self->array_dive($var, $tv);
                     }
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                    elsif (defined $val)       { $ret .= ($self->{auto_escape} ? escape($val) : $val) }
+                    elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
                 } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
@@ -1301,30 +1311,73 @@ sub _dot_to_bracket_cb {
 sub _micro_optimize {
     my $self = shift;
     my $str  = shift // '';
-    if ($str =~ /^-?\d+(?:\.\d+)?$/) { return $str }
 
-    if (!length $str) { return undef }
+    # Check shape cache — avoids re-running all the classification regexes
+    # on repeat calls with the same expression string (e.g. a foreach/if
+    # condition re-evaluated on every loop iteration). Only the *shape*
+    # (literal vs. variable-reference, and which var) is cached; the
+    # actual value is still looked up live from tpl_vars each call.
+    my $cached = $self->{_micro_cache}{$str};
+    if ($cached) {
+        my $type = $cached->[0];
+        if ($type eq 'lit') { return $cached->[1] }
+        if ($type eq 'var') {
+            my (undef, $neg, $key) = @$cached;
+            if (exists $self->{tpl_vars}{$key}) {
+                return $neg ? !$self->{tpl_vars}{$key} : $self->{tpl_vars}{$key};
+            }
+            return undef;
+        }
+        return undef; # type eq 'none'
+    }
+
+    if ($str =~ /^-?\d+(?:\.\d+)?$/) {
+        $self->{_micro_cache}{$str} = ['lit', $str];
+        return $str;
+    }
+
+    if (!length $str) {
+        $self->{_micro_cache}{$str} = ['none'];
+        return undef;
+    }
     my $first = ord($str);
     my $last  = ord(substr($str, -1));
 
     if ($first == 39 && $last == 39) {
         my $tmp = substr($str, 1, length($str) - 2);
-        if (index($tmp, "'") < 0) { return $tmp }
+        if (index($tmp, "'") < 0) {
+            $self->{_micro_cache}{$str} = ['lit', $tmp];
+            return $tmp;
+        }
     }
 
     if ($first == 34 && $last == 34) {
         my $tmp = substr($str, 1, length($str) - 2);
-        if (index($tmp, '$') < 0 && index($tmp, '"') < 0) { return $tmp }
+        if (index($tmp, '$') < 0 && index($tmp, '"') < 0) {
+            $self->{_micro_cache}{$str} = ['lit', $tmp];
+            return $tmp;
+        }
     }
 
-    if ($str =~ /^(!?)\$__S->\{sluz_pfx_(\w+)\}$/ && exists $self->{tpl_vars}{$2}) {
-        return $1 ? !$self->{tpl_vars}{$2} : $self->{tpl_vars}{$2};
+    if ($str =~ /^(!?)\$__S->\{sluz_pfx_(\w+)\}$/) {
+        my ($neg, $key) = ($1, $2);
+        $self->{_micro_cache}{$str} = ['var', $neg, $key];
+        if (exists $self->{tpl_vars}{$key}) {
+            return $neg ? !$self->{tpl_vars}{$key} : $self->{tpl_vars}{$key};
+        }
+        return undef;
     }
 
-    if ($str =~ /^(!?)(\w+)$/ && exists $self->{tpl_vars}{$2}) {
-        return $1 ? !$self->{tpl_vars}{$2} : $self->{tpl_vars}{$2};
+    if ($str =~ /^(!?)(\w+)$/) {
+        my ($neg, $key) = ($1, $2);
+        $self->{_micro_cache}{$str} = ['var', $neg, $key];
+        if (exists $self->{tpl_vars}{$key}) {
+            return $neg ? !$self->{tpl_vars}{$key} : $self->{tpl_vars}{$key};
+        }
+        return undef;
     }
 
+    $self->{_micro_cache}{$str} = ['none'];
     return undef;
 }
 
