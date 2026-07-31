@@ -21,7 +21,9 @@ sluz_test($sluz, "{literal}\nfoo\n{/literal}"            , "foo"                
 sluz_test($sluz, "{literal}\nfoo\nbar\n{/literal}"       , "foo\nbar"           , 'Literal #7 - internal newline preserved');
 sluz_test($sluz, "{literal}\nfoo{/literal}"              , "foo"                , 'Literal #8 - only open tag on its own line');
 sluz_test($sluz, "{literal}foo\n{/literal}"              , "foo"                , 'Literal #9 - only close tag on its own line');
-sluz_test($sluz, ' { '                                   , ' { '                , 'Literal #10 - { with whitespace');
-sluz_test($sluz, '{}'                                    , '{}'                 , 'Literal #7 - Raw {}');
+sluz_test($sluz, "x{literal}\nfoo\n{/literal}"           , "x\nfoo"             , 'Literal #10 - inline open keeps \n, close alone strips');
+sluz_test($sluz, "{literal}\nfoo\n{/literal}y"           , "foo\ny"             , 'Literal #11 - open alone strips, inline close keeps \n');
+sluz_test($sluz, ' { '                                   , ' { '                , 'Literal #12 - { with whitespace');
+sluz_test($sluz, '{}'                                    , '{}'                 , 'Literal #13 - Raw {}');
 
 done_testing();

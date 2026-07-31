@@ -49,4 +49,7 @@ sluz_test($sluz, "{if \$zero}\nYES\n{else}\nNO\n{/if}"                          
 sluz_test($sluz, "{if \$zero}\n1\n{elseif \$debug}\n2\n{else}\n3\n{/if}"                   , "2\n"    , 'If #33 - Leading newline stripped from elseif branch');
 sluz_test($sluz, "{if \$bogus_var}\n1\n{elseif \$bogus_var2}\n2\n{elseif \$debug}\n3\n{else}\n4\n{/if}", "3\n", 'If #34 - Leading newline stripped from latter elseif branch');
 
+sluz_test($sluz, '{if $number + 2 > 10}YES{/if}'         , 'YES'  , 'If #35 - Arithmetic in condition (true)');
+sluz_test($sluz, '{if $number - 20 > 10}YES{/if}'        , ''     , 'If #36 - Arithmetic in condition (false)');
+
 done_testing();

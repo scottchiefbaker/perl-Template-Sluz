@@ -74,4 +74,11 @@ $s_on->assign('items_hash', {one => '<1>', two => '<2>'});
 
 is($s_on->parse_string('{foreach $items_hash as $v}{$v}{/foreach}'), '&lt;1&gt;&lt;2&gt;', 'on: hash foreach sorted escaped');
 
+# ---------------------------------------------------------------------------
+# Expression blocks are not auto-escaped
+# ---------------------------------------------------------------------------
+is($s_on->parse_string('{$zero + 3}')              , '3'                                     , 'on: arithmetic expression not escaped');
+is($s_on->parse_string('{$xss . "!"}')             , '<script>alert(1)</script>!'           , 'on: concat expression bypasses auto-escape');
+is($s_on->parse_string('{$xss|escape}')            , '&lt;script&gt;alert(1)&lt;/script&gt;', 'on: sanity - variable block still escaped');
+
 done_testing();

@@ -64,6 +64,22 @@ sluz_test($sluz, '{!$true}'                               , ''            , 'Bas
 sluz_test($sluz, '{$car}'                                 , 'Honda'       , 'Basic #38 - String variable set from hash');
 sluz_test($sluz, '{$ltuae}'                               , '42'          , 'Basic #39 - Integer variable set from hash');
 sluz_test($sluz, '{$milk|join:":"}'                       , 'goat:cow:soy', 'Basic #40 - Array set from hash');
+sluz_test($sluz, '{$x - 3}'                               , '4'           , 'Basic #41 - Subtraction on a variable');
+sluz_test($sluz, '{3 - $x}'                               , '-4'          , 'Basic #42 - Subtraction with leading constant');
+sluz_test($sluz, '{$x / 2}'                               , '3.5'         , 'Basic #43 - Division on a variable');
+sluz_test($sluz, '{$x % 3}'                               , '1'           , 'Basic #44 - Modulo on a variable');
+sluz_test($sluz, '{$x * 3}'                               , '21'          , 'Basic #45 - Multiplication on a variable');
+sluz_test($sluz, '{$first . " " . $last}'                 , 'Scott Baker' , 'Basic #46 - String concatenation');
+sluz_test($sluz, '{$x > 3 ? "yes" : "no"}'                , 'yes'         , 'Basic #47 - Ternary expression');
+sluz_test($sluz, '{$number + $null}'                      , '15'          , 'Basic #48 - Mixed types: number + null');
+sluz_test($sluz, '{$number + $x}'                         , '22'          , 'Basic #49 - Mixed types: number + numeric string');
+sluz_test($sluz, '{$empty_string|default:"N/A"}',            'N/A'           , 'Basic #50 - Default with forward slash (empty)');
+sluz_test($sluz, '{$first|default:"N/A"}',                  'Scott'         , 'Basic #51 - Default with forward slash (non-empty)');
+sluz_test($sluz, '{$empty_string|default:"path/to/file"}',   'path/to/file'  , 'Basic #52 - Default with path containing slashes');
+sluz_test($sluz, '{$empty_string|default:"yes/no"}',         'yes/no'        , 'Basic #53 - Default with slash abbreviation');
+sluz_test($sluz, '{$empty_string|default:"C:\\"}',           'C:\\'          , 'Basic #54 - Default with backslash');
+sluz_test($sluz, '{$animal|uc}'                               , 'KITTEN'   , 'Basic #55 - Modifier on a variable');
+sluz_test($sluz, '{$word|lc|ucfirst}'                          , 'Crazy'    , 'Basic #56 - Chaining modifiers');
 
 # -------------------------------------------------------------------
 # Custom/User functions
