@@ -380,9 +380,11 @@ sub _precompute_tags {
     my $cd_qr = $self->{_cd_qr};
     $self->{_space_guard_re} = qr/\s[$od_qr$cd_qr]\s/;
 
-    # Precompiled variable regex: {$var} or {$var.dot.path}
+    # Precompiled variable regex: {$var} or {$var.dot.path} or {$var|modifiers...}.
+    # A variable name is word chars and dots, optionally followed by a
+    # modifier chain. Anything else (e.g. {$x - 3}) is an expression block.
     $self->{_re_var_simple} = qr/^\Q$o\E\$(\w[\w.]*)\Q$c\E$/;
-    $self->{_re_var_full}   = qr/^\Q$o\E\$([\w|.'";\t :,!@#%^&*?_\/\\\-]+)\Q$c\E$/;
+    $self->{_re_var_full}   = qr/^\Q$o\E\$(\w[\w.]*(?:\|.*)?)\Q$c\E$/;
 
     # Precompiled foreach regex
     $self->{_re_foreach} = qr/^\Q$o\Eforeach (\$\w[\w.]*) as \$(\w+)(?: => \$(\w+))?\Q$c\E(.+)\Q$o\E\/foreach\Q$c\E$/s;
