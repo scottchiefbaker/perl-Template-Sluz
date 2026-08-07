@@ -137,8 +137,8 @@ sub fetch {
     }
 
     my $str    = $self->_get_tpl_content($tpl_file);
-    my @blocks = $self->_get_blocks($str);
-    my $html   = $self->_process_blocks(\@blocks);
+    my $blocks = $self->_get_blocks_ref($str);
+    my $html   = $self->_process_blocks($blocks);
 
     $self->{fetch_called} = 1;
     return $html;
@@ -158,9 +158,9 @@ sub display {
 sub parse_string {
     my $self    = shift;
     my $tpl_str = shift // '';
-    my @blocks  = $self->_get_blocks($tpl_str);
+    my $blocks  = $self->_get_blocks_ref($tpl_str);
 
-    return $self->_process_blocks(\@blocks);
+    return $self->_process_blocks($blocks);
 }
 
 # Getter/setter for parent TPL
@@ -686,6 +686,19 @@ sub _get_blocks {
     return @blocks;
 }
 
+# Internal callers can reuse the cached arrayref without copying it into a
+# temporary list. Keep _get_blocks() list-returning for existing callers.
+sub _get_blocks_ref {
+    my $self = shift;
+    my $str  = shift // '';
+
+    if (!exists $self->{_blocks_cache}{$str}) {
+        $self->_get_blocks($str);
+    }
+
+    return $self->{_blocks_cache}{$str};
+}
+
 sub _process_blocks {
     my $self   = shift;
     my $blocks = shift;
@@ -989,13 +1002,13 @@ sub _foreach_block {
 
     my $conv_src = $self->_convert_vars($src_expr);
     $payload     = $self->ltrim_one($payload, "\n");
-    my @blocks   = $self->_get_blocks($payload);
+    my $blocks   = $self->_get_blocks_ref($payload);
 
     # Pre-classify blocks for fast dispatch in the loop (cached in block arrays)
     # type: -1=empty, 0=text, 1=simple_var, 2=if_block, 99=other
     my $od     = $self->{open_delim};
     my $od_ord = $self->{_od_ord};
-    for my $b (@blocks) {
+    for my $b (@$blocks) {
         next if defined $b->[2];
         my $bs = $b->[0];
         if (!length $bs) {
@@ -1006,11 +1019,23 @@ sub _foreach_block {
                  && $bs =~ $self->{_re_var_simple}) {
             $b->[2] = 1;
             $b->[3] = $1;
+            $b->[4] = (index($1, '.') >= 0);
         } elsif (substr($bs, 0, $self->{_tag_if_len}) eq $self->{_tag_if}
                  && substr($bs, -$self->{_tag_if_close_len}) eq $self->{_tag_if_close}) {
             $b->[2] = 2;
         } else {
             $b->[2] = 99;
+        }
+    }
+
+    # Simple variable/text loops do not execute expressions, so __S does not
+    # need to be updated for every item. This is especially useful for nested
+    # and large loops.
+    my $need_eval = 0;
+    for my $b (@$blocks) {
+        if ($b->[2] == 2 || $b->[2] == 99) {
+            $need_eval = 1;
+            last;
         }
     }
 
@@ -1069,48 +1094,42 @@ sub _foreach_block {
             if ($need_first) {
                 my $v = ($idx == 0) ? 1 : 0;
                 $tv->{__FOREACH_FIRST} = $v;
-                $ks->{$first_ks}       = $v;
+                $ks->{$first_ks}       = $v if $need_eval;
             }
             if ($need_last) {
                 my $v = ($idx == $last) ? 1 : 0;
                 $tv->{__FOREACH_LAST} = $v;
-                $ks->{$last_ks}       = $v;
+                $ks->{$last_ks}       = $v if $need_eval;
             }
             if ($need_index) {
                 $tv->{__FOREACH_INDEX} = $idx;
-                $ks->{$index_ks}       = $idx;
+                $ks->{$index_ks}       = $idx if $need_eval;
             }
             if (defined $oval) {
                 $tv->{$okey} = $i;
                 $tv->{$oval} = $src->[$i];
-                $ks->{$okey_ks} = $i;
-                $ks->{$oval_ks} = $src->[$i];
+                $ks->{$okey_ks} = $i if $need_eval;
+                $ks->{$oval_ks} = $src->[$i] if $need_eval;
             } else {
                 $tv->{$okey} = $src->[$i];
-                $ks->{$okey_ks} = $src->[$i];
+                $ks->{$okey_ks} = $src->[$i] if $need_eval;
             }
-            # Inline block processing with pre-classified types — no substr/regex per iteration
-            for my $b (@blocks) {
+            # Inline block processing with pre-classified types — no
+            # substr/regex work is performed per iteration.
+            for my $b (@$blocks) {
                 my $type = $b->[2];
                 if ($type == 0) {
                     $ret .= $b->[0];
                 } elsif ($type == 1) {
                     my $var = $b->[3];
-                    my $val;
-                    if (index($var, '.') < 0) {
-                        $val = $tv->{$var};
-                    } else {
-                        $val = $self->array_dive($var, $tv);
-                    }
+                    my $val = $b->[4] ? $self->array_dive($var, $tv) : $tv->{$var};
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
                     elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
                 } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
-                } elsif ($type == -1) {
-                    next;
-                } else {
+                } elsif ($type != -1) {
                     $ret .= $self->_process_block($b->[0], $b->[1]);
                 }
             }
@@ -1124,48 +1143,40 @@ sub _foreach_block {
             if ($need_first) {
                 my $v = ($idx == 0) ? 1 : 0;
                 $tv->{__FOREACH_FIRST} = $v;
-                $ks->{$first_ks}       = $v;
+                $ks->{$first_ks}       = $v if $need_eval;
             }
             if ($need_last) {
                 my $v = ($idx == $last) ? 1 : 0;
                 $tv->{__FOREACH_LAST} = $v;
-                $ks->{$last_ks}       = $v;
+                $ks->{$last_ks}       = $v if $need_eval;
             }
             if ($need_index) {
                 $tv->{__FOREACH_INDEX} = $idx;
-                $ks->{$index_ks}       = $idx;
+                $ks->{$index_ks}       = $idx if $need_eval;
             }
             if (defined $oval) {
                 $tv->{$okey} = $k;
                 $tv->{$oval} = $src->{$k};
-                $ks->{$okey_ks} = $k;
-                $ks->{$oval_ks} = $src->{$k};
+                $ks->{$okey_ks} = $k if $need_eval;
+                $ks->{$oval_ks} = $src->{$k} if $need_eval;
             } else {
                 $tv->{$okey} = $src->{$k};
-                $ks->{$okey_ks} = $src->{$k};
+                $ks->{$okey_ks} = $src->{$k} if $need_eval;
             }
-            # Inline block processing with pre-classified types — no substr/regex per iteration
-            for my $b (@blocks) {
+            for my $b (@$blocks) {
                 my $type = $b->[2];
                 if ($type == 0) {
                     $ret .= $b->[0];
                 } elsif ($type == 1) {
                     my $var = $b->[3];
-                    my $val;
-                    if (index($var, '.') < 0) {
-                        $val = $tv->{$var};
-                    } else {
-                        $val = $self->array_dive($var, $tv);
-                    }
+                    my $val = $b->[4] ? $self->array_dive($var, $tv) : $tv->{$var};
                     if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
                     elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
                 } elsif ($type == 2) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
-                } elsif ($type == -1) {
-                    next;
-                } else {
+                } elsif ($type != -1) {
                     $ret .= $self->_process_block($b->[0], $b->[1]);
                 }
             }
@@ -1180,10 +1191,12 @@ sub _foreach_block {
         } else {
             delete $self->{tpl_vars}{$tpl_keys[$i]};
         }
-        if ($ks_exists[$i]) {
-            $self->{__S}{$ks_keys[$i]} = $ks_vals[$i];
-        } else {
-            delete $self->{__S}{$ks_keys[$i]};
+        if ($need_eval) {
+            if ($ks_exists[$i]) {
+                $self->{__S}{$ks_keys[$i]} = $ks_vals[$i];
+            } else {
+                delete $self->{__S}{$ks_keys[$i]};
+            }
         }
     }
 
@@ -1328,6 +1341,9 @@ sub _micro_optimize {
             }
             return undef;
         }
+        if ($type eq 'cmp') {
+            return $self->_micro_compare($cached, $self->{tpl_vars}{$cached->[1]});
+        }
         return undef; # type eq 'none'
     }
 
@@ -1339,6 +1355,19 @@ sub _micro_optimize {
     if (!length $str) {
         $self->{_micro_cache}{$str} = ['none'];
         return undef;
+    }
+
+    # Fast path for the common loop condition {$item eq "value"}. The
+    # expression shape is stable across iterations; only the variable value
+    # changes, so avoid invoking Perl eval for every item.
+    if ($str =~ /^\$__S->\{sluz_pfx_(\w+)\}\s*(==|!=|eq|ne|>=|<=|>|<)\s*(?:"([^"]*)"|'([^']*)'|(-?\d+(?:\.\d+)?))$/) {
+        my ($key, $op, $dquote, $squote, $number) = ($1, $2, $3, $4, $5);
+        my $literal = defined $number ? $number
+            : (defined $dquote ? $dquote : $squote);
+        my $numeric = ($op ne 'eq' && $op ne 'ne');
+        my $entry = ['cmp', $key, $op, $literal, $numeric];
+        $self->{_micro_cache}{$str} = $entry;
+        return $self->_micro_compare($entry, $self->{tpl_vars}{$key});
     }
     my $first = ord($str);
     my $last  = ord(substr($str, -1));
@@ -1379,6 +1408,24 @@ sub _micro_optimize {
 
     $self->{_micro_cache}{$str} = ['none'];
     return undef;
+}
+
+sub _micro_compare {
+    my ($self, $entry, $left) = @_;
+    my ($op, $right, $numeric) = @$entry[2, 3, 4];
+
+    no warnings;
+    if ($numeric) {
+        return $op eq '==' ? $left == $right
+            : $op eq '!=' ? $left != $right
+            : $op eq '>=' ? $left >= $right
+            : $op eq '<=' ? $left <= $right
+            : $op eq '>'  ? $left >  $right
+            :                $left <  $right;
+    }
+
+    return $op eq 'eq' ? $left eq $right
+        :                $left ne $right;
 }
 
 sub _peval {
