@@ -3,14 +3,11 @@ use strict;
 use warnings;
 use 5.016;
 
-use FindBin;
-use lib "$FindBin::Bin/lib";
-
 use Template::Sluz;
 use Time::HiRes;
 use Getopt::Long qw(GetOptions);
 
-my $ITERATIONS = 5000;
+my $ITERATIONS = 15000;
 my $filter;
 
 GetOptions(
