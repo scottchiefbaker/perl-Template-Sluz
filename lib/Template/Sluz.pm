@@ -1144,12 +1144,28 @@ sub _foreach_block {
     # Simple variable/text loops do not execute expressions, so __S does not
     # need to be updated for every item. This is especially useful for nested
     # and large loops. (Literals never reference variables either.)
-    my $need_eval = 0;
+    #
+    # Additionally, per-iteration tpl_vars writes for the loop variables can
+    # be skipped entirely when no block can read them through tpl_vars:
+    # that requires every block to be text/literal/simple-var, with no
+    # dotted simple var rooted at the loop variable (array_dive would read
+    # tpl_vars). Simple vars naming the loop variable are served directly
+    # from the current item in the dispatch below.
+    my $need_eval      = 0;
+    my $skip_key_write = 1;
+    my $skip_val_write = 1;
     for my $b (@$blocks) {
         my $t = $b->[2];
         if ($t != 0 && $t != 1 && $t != 6 && $t != -1) {
-            $need_eval = 1;
-            last;
+            $need_eval      = 1;
+            $skip_key_write = 0;
+            $skip_val_write = 0;
+        } elsif ($t == 1 && $b->[4]) {
+            my $var = $b->[3];
+            my $d   = index($var, '.');
+            my $root = $d < 0 ? $var : substr($var, 0, $d);
+            if ($root eq $okey)                  { $skip_key_write = 0 }
+            if (defined $oval && $root eq $oval) { $skip_val_write = 0 }
         }
     }
 
@@ -1183,18 +1199,22 @@ sub _foreach_block {
 
     # Save only the keys we'll modify — O(k) where k <= 5, vs O(n) for
     # copying the entire tpl_vars/__S hashes. Big win for nested foreach.
-    my @tpl_keys = ($okey);
-    my @ks_keys  = ($okey_ks);
-    if (defined $oval) {
-        push @tpl_keys, $oval;
-        push @ks_keys,  $oval_ks;
-    }
+    # Keys whose per-iteration writes are skipped need no save/restore.
+    my @tpl_keys;
+    push @tpl_keys, $okey if !$skip_key_write;
+    push @tpl_keys, $oval if defined $oval && !$skip_val_write;
     push @tpl_keys, '__FOREACH_FIRST' if $need_first;
-    push @ks_keys,  $first_ks         if $need_first;
     push @tpl_keys, '__FOREACH_LAST'  if $need_last;
-    push @ks_keys,  $last_ks          if $need_last;
     push @tpl_keys, '__FOREACH_INDEX' if $need_index;
-    push @ks_keys,  $index_ks         if $need_index;
+
+    my @ks_keys;
+    if ($need_eval) {
+        push @ks_keys, $okey_ks;
+        push @ks_keys, $oval_ks  if defined $oval;
+        push @ks_keys, $first_ks if $need_first;
+        push @ks_keys, $last_ks  if $need_last;
+        push @ks_keys, $index_ks if $need_index;
+    }
 
     my @tpl_exists = map { exists $self->{tpl_vars}{$_} } @tpl_keys;
     my @tpl_vals   = map { $self->{tpl_vars}{$_} } @tpl_keys;
@@ -1208,125 +1228,257 @@ sub _foreach_block {
 
     if (ref $src eq 'ARRAY') {
         my $last = $#$src;
-        for my $i (0 .. $last) {
-            if ($need_first) {
-                my $v = ($idx == 0) ? 1 : 0;
-                $tv->{__FOREACH_FIRST} = $v;
-                $ks->{$first_ks}       = $v if $need_eval;
-            }
-            if ($need_last) {
-                my $v = ($idx == $last) ? 1 : 0;
-                $tv->{__FOREACH_LAST} = $v;
-                $ks->{$last_ks}       = $v if $need_eval;
-            }
-            if ($need_index) {
-                $tv->{__FOREACH_INDEX} = $idx;
-                $ks->{$index_ks}       = $idx if $need_eval;
-            }
-            if (defined $oval) {
-                $tv->{$okey} = $i;
-                $tv->{$oval} = $src->[$i];
-                $ks->{$okey_ks} = $i if $need_eval;
-                $ks->{$oval_ks} = $src->[$i] if $need_eval;
-            } else {
-                $tv->{$okey} = $src->[$i];
-                $ks->{$okey_ks} = $src->[$i] if $need_eval;
-            }
-            # Inline block processing with pre-classified types — no
-            # substr/regex work is performed per iteration.
-            for my $b (@$blocks) {
-                my $type = $b->[2];
-                if ($type == 0) {
-                    $ret .= $b->[0];
-                } elsif ($type == 1) {
-                    my $var = $b->[3];
-                    my $val = $b->[4] ? $self->array_dive($var, $tv) : $tv->{$var};
-                    if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
-                    elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                    elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
-                } elsif ($type == 3) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_if_block($b->[0]);
-                } elsif ($type == 4) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
-                } elsif ($type == 2) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_variable_block($b->[3]);
-                } elsif ($type == 6) {
-                    $ret .= $b->[3];
-                } elsif ($type == 7) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_expression_block($b->[0], $b->[3]);
-                } elsif ($type == 5) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_include_block($b->[0]);
-                } elsif ($type != -1) {
-                    $ret .= $self->_process_block($b->[0], $b->[1]);
+        if (defined $oval) {
+            for my $i (0 .. $last) {
+                if ($need_first) {
+                    my $v = ($idx == 0) ? 1 : 0;
+                    $tv->{__FOREACH_FIRST} = $v;
+                    $ks->{$first_ks}       = $v if $need_eval;
                 }
+                if ($need_last) {
+                    my $v = ($idx == $last) ? 1 : 0;
+                    $tv->{__FOREACH_LAST} = $v;
+                    $ks->{$last_ks}       = $v if $need_eval;
+                }
+                if ($need_index) {
+                    $tv->{__FOREACH_INDEX} = $idx;
+                    $ks->{$index_ks}       = $idx if $need_eval;
+                }
+                my $v_key = $i;
+                my $v_val = $src->[$i];
+                $tv->{$okey} = $v_key if !$skip_key_write;
+                $tv->{$oval} = $v_val if !$skip_val_write;
+                $ks->{$okey_ks} = $v_key if $need_eval;
+                $ks->{$oval_ks} = $v_val if $need_eval;
+                # Inline block processing with pre-classified types — no
+                # substr/regex work per iteration. Simple vars naming a
+                # loop variable are served from $v_key/$v_val directly.
+                for my $b (@$blocks) {
+                    my $type = $b->[2];
+                    if ($type == 0) {
+                        $ret .= $b->[0];
+                    } elsif ($type == 1) {
+                        my $val;
+                        if ($b->[4]) {
+                            $val = $self->array_dive($b->[3], $tv);
+                        } elsif ($b->[3] eq $okey) {
+                            $val = $v_key;
+                        } elsif ($b->[3] eq $oval) {
+                            $val = $v_val;
+                        } else {
+                            $val = $tv->{$b->[3]};
+                        }
+                        if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
+                        elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
+                        elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
+                    } elsif ($type == 3) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_if_block($b->[0]);
+                    } elsif ($type == 4) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
+                    } elsif ($type == 2) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_variable_block($b->[3]);
+                    } elsif ($type == 6) {
+                        $ret .= $b->[3];
+                    } elsif ($type == 7) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_expression_block($b->[0], $b->[3]);
+                    } elsif ($type == 5) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_include_block($b->[0]);
+                    } elsif ($type != -1) {
+                        $ret .= $self->_process_block($b->[0], $b->[1]);
+                    }
+                }
+                $idx++;
             }
-            $idx++;
+        } else {
+            for my $i (0 .. $last) {
+                if ($need_first) {
+                    my $v = ($idx == 0) ? 1 : 0;
+                    $tv->{__FOREACH_FIRST} = $v;
+                    $ks->{$first_ks}       = $v if $need_eval;
+                }
+                if ($need_last) {
+                    my $v = ($idx == $last) ? 1 : 0;
+                    $tv->{__FOREACH_LAST} = $v;
+                    $ks->{$last_ks}       = $v if $need_eval;
+                }
+                if ($need_index) {
+                    $tv->{__FOREACH_INDEX} = $idx;
+                    $ks->{$index_ks}       = $idx if $need_eval;
+                }
+                my $v_key = $src->[$i];
+                $tv->{$okey} = $v_key if !$skip_key_write;
+                $ks->{$okey_ks} = $v_key if $need_eval;
+                for my $b (@$blocks) {
+                    my $type = $b->[2];
+                    if ($type == 0) {
+                        $ret .= $b->[0];
+                    } elsif ($type == 1) {
+                        my $val;
+                        if ($b->[4]) {
+                            $val = $self->array_dive($b->[3], $tv);
+                        } elsif ($b->[3] eq $okey) {
+                            $val = $v_key;
+                        } else {
+                            $val = $tv->{$b->[3]};
+                        }
+                        if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
+                        elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
+                        elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
+                    } elsif ($type == 3) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_if_block($b->[0]);
+                    } elsif ($type == 4) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
+                    } elsif ($type == 2) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_variable_block($b->[3]);
+                    } elsif ($type == 6) {
+                        $ret .= $b->[3];
+                    } elsif ($type == 7) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_expression_block($b->[0], $b->[3]);
+                    } elsif ($type == 5) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_include_block($b->[0]);
+                    } elsif ($type != -1) {
+                        $ret .= $self->_process_block($b->[0], $b->[1]);
+                    }
+                }
+                $idx++;
+            }
         }
     } elsif (ref $src eq 'HASH') {
         my @keys = sort keys %$src;
         my $last = $#keys;
-        for my $i (0 .. $last) {
-            my $k = $keys[$i];
-            if ($need_first) {
-                my $v = ($idx == 0) ? 1 : 0;
-                $tv->{__FOREACH_FIRST} = $v;
-                $ks->{$first_ks}       = $v if $need_eval;
-            }
-            if ($need_last) {
-                my $v = ($idx == $last) ? 1 : 0;
-                $tv->{__FOREACH_LAST} = $v;
-                $ks->{$last_ks}       = $v if $need_eval;
-            }
-            if ($need_index) {
-                $tv->{__FOREACH_INDEX} = $idx;
-                $ks->{$index_ks}       = $idx if $need_eval;
-            }
-            if (defined $oval) {
-                $tv->{$okey} = $k;
-                $tv->{$oval} = $src->{$k};
-                $ks->{$okey_ks} = $k if $need_eval;
-                $ks->{$oval_ks} = $src->{$k} if $need_eval;
-            } else {
-                $tv->{$okey} = $src->{$k};
-                $ks->{$okey_ks} = $src->{$k} if $need_eval;
-            }
-            for my $b (@$blocks) {
-                my $type = $b->[2];
-                if ($type == 0) {
-                    $ret .= $b->[0];
-                } elsif ($type == 1) {
-                    my $var = $b->[3];
-                    my $val = $b->[4] ? $self->array_dive($var, $tv) : $tv->{$var};
-                    if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
-                    elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                    elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
-                } elsif ($type == 3) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_if_block($b->[0]);
-                } elsif ($type == 4) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
-                } elsif ($type == 2) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_variable_block($b->[3]);
-                } elsif ($type == 6) {
-                    $ret .= $b->[3];
-                } elsif ($type == 7) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_expression_block($b->[0], $b->[3]);
-                } elsif ($type == 5) {
-                    $self->{char_pos} = $b->[1];
-                    $ret .= $self->_include_block($b->[0]);
-                } elsif ($type != -1) {
-                    $ret .= $self->_process_block($b->[0], $b->[1]);
+        if (defined $oval) {
+            for my $i (0 .. $last) {
+                my $k = $keys[$i];
+                if ($need_first) {
+                    my $v = ($idx == 0) ? 1 : 0;
+                    $tv->{__FOREACH_FIRST} = $v;
+                    $ks->{$first_ks}       = $v if $need_eval;
                 }
+                if ($need_last) {
+                    my $v = ($idx == $last) ? 1 : 0;
+                    $tv->{__FOREACH_LAST} = $v;
+                    $ks->{$last_ks}       = $v if $need_eval;
+                }
+                if ($need_index) {
+                    $tv->{__FOREACH_INDEX} = $idx;
+                    $ks->{$index_ks}       = $idx if $need_eval;
+                }
+                my $v_key = $k;
+                my $v_val = $src->{$k};
+                $tv->{$okey} = $v_key if !$skip_key_write;
+                $tv->{$oval} = $v_val if !$skip_val_write;
+                $ks->{$okey_ks} = $v_key if $need_eval;
+                $ks->{$oval_ks} = $v_val if $need_eval;
+                for my $b (@$blocks) {
+                    my $type = $b->[2];
+                    if ($type == 0) {
+                        $ret .= $b->[0];
+                    } elsif ($type == 1) {
+                        my $val;
+                        if ($b->[4]) {
+                            $val = $self->array_dive($b->[3], $tv);
+                        } elsif ($b->[3] eq $okey) {
+                            $val = $v_key;
+                        } elsif ($b->[3] eq $oval) {
+                            $val = $v_val;
+                        } else {
+                            $val = $tv->{$b->[3]};
+                        }
+                        if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
+                        elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
+                        elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
+                    } elsif ($type == 3) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_if_block($b->[0]);
+                    } elsif ($type == 4) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
+                    } elsif ($type == 2) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_variable_block($b->[3]);
+                    } elsif ($type == 6) {
+                        $ret .= $b->[3];
+                    } elsif ($type == 7) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_expression_block($b->[0], $b->[3]);
+                    } elsif ($type == 5) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_include_block($b->[0]);
+                    } elsif ($type != -1) {
+                        $ret .= $self->_process_block($b->[0], $b->[1]);
+                    }
+                }
+                $idx++;
             }
-            $idx++;
+        } else {
+            for my $i (0 .. $last) {
+                my $k = $keys[$i];
+                if ($need_first) {
+                    my $v = ($idx == 0) ? 1 : 0;
+                    $tv->{__FOREACH_FIRST} = $v;
+                    $ks->{$first_ks}       = $v if $need_eval;
+                }
+                if ($need_last) {
+                    my $v = ($idx == $last) ? 1 : 0;
+                    $tv->{__FOREACH_LAST} = $v;
+                    $ks->{$last_ks}       = $v if $need_eval;
+                }
+                if ($need_index) {
+                    $tv->{__FOREACH_INDEX} = $idx;
+                    $ks->{$index_ks}       = $idx if $need_eval;
+                }
+                my $v_key = $src->{$k};
+                $tv->{$okey} = $v_key if !$skip_key_write;
+                $ks->{$okey_ks} = $v_key if $need_eval;
+                for my $b (@$blocks) {
+                    my $type = $b->[2];
+                    if ($type == 0) {
+                        $ret .= $b->[0];
+                    } elsif ($type == 1) {
+                        my $val;
+                        if ($b->[4]) {
+                            $val = $self->array_dive($b->[3], $tv);
+                        } elsif ($b->[3] eq $okey) {
+                            $val = $v_key;
+                        } else {
+                            $val = $tv->{$b->[3]};
+                        }
+                        if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
+                        elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
+                        elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
+                    } elsif ($type == 3) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_if_block($b->[0]);
+                    } elsif ($type == 4) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
+                    } elsif ($type == 2) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_variable_block($b->[3]);
+                    } elsif ($type == 6) {
+                        $ret .= $b->[3];
+                    } elsif ($type == 7) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_expression_block($b->[0], $b->[3]);
+                    } elsif ($type == 5) {
+                        $self->{char_pos} = $b->[1];
+                        $ret .= $self->_include_block($b->[0]);
+                    } elsif ($type != -1) {
+                        $ret .= $self->_process_block($b->[0], $b->[1]);
+                    }
+                }
+                $idx++;
+            }
         }
     }
 
@@ -1337,7 +1489,9 @@ sub _foreach_block {
         } else {
             delete $self->{tpl_vars}{$tpl_keys[$i]};
         }
-        if ($need_eval) {
+    }
+    if ($need_eval) {
+        for my $i (0 .. $#ks_keys) {
             if ($ks_exists[$i]) {
                 $self->{__S}{$ks_keys[$i]} = $ks_vals[$i];
             } else {
