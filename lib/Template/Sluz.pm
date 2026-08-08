@@ -224,11 +224,28 @@ sub array_dive {
         return $haystack->{$needle};
     }
 
-    # Walk dotted path (e.g. "user.address.city") through nested structures
-    my @parts = split /\./, $needle;
+    # Fast path: exactly one dot and a hash -> hash walk (the common
+    # case, e.g. "config.theme"). Missing keys yield undef exactly like
+    # the generic walk below.
+    my $dot1 = index($needle, '.');
+    if ($dot1 > 0 && $dot1 < length($needle) - 1
+        && index($needle, '.', $dot1 + 1) < 0
+        && ref $haystack eq 'HASH') {
+        my $mid = $haystack->{substr($needle, 0, $dot1)};
+        if (ref $mid eq 'HASH') {
+            return $mid->{substr($needle, $dot1 + 1)};
+        }
+        if (!defined $mid) { return undef }
+        # ARRAY or scalar first level: fall through to the generic walk
+    }
+
+    # Walk dotted path (e.g. "user.address.city") through nested
+    # structures. Split parts are cached per needle.
+    my $parts = $self->{_dive_parts_cache}{$needle}
+             // ($self->{_dive_parts_cache}{$needle} = [split /\./, $needle]);
     my $arr   = $haystack;
 
-    for my $elem (@parts) {
+    for my $elem (@$parts) {
         if (!defined $arr) { return undef }
         if (ref $arr eq 'ARRAY') {
             if (!($elem =~ /^\d+$/ && $elem < @$arr)) { return undef }
