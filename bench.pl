@@ -3,6 +3,9 @@ use strict;
 use warnings;
 use 5.016;
 
+use FindBin;
+use lib "$FindBin::Bin/lib";
+
 use Template::Sluz;
 use Time::HiRes;
 use Getopt::Long qw(GetOptions);

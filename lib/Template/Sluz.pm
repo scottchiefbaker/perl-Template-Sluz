@@ -682,6 +682,64 @@ sub _get_blocks {
         $prev_is_if = $cur_is_if;
     }
 
+    # Pre-classify blocks once so renders dispatch on an integer type
+    # instead of re-running substr/regex checks on every parse.
+    # type: -1=empty 0=text 1=simple_var 2=mod_var 3=if 4=foreach
+    #        5=include 6=literal 7=expr 9=unknown (_process_block fallback)
+    my $var_tag      = "${od}\$";
+    my $od_ord       = $self->{_od_ord};
+    my $tag_if_close = $self->{_tag_if_close};
+    my $tag_include  = $self->{_tag_include};
+    my $re_var_full  = $self->{_re_var_full};
+    my $re_foreach   = $self->{_re_foreach};
+    my $re_literal   = $self->{_re_literal};
+    my $re_expr      = $self->{_re_expr};
+    for my $b (@blocks) {
+        my $bs = $b->[0];
+        if (!length $bs)         { $b->[2] = -1; next }
+        if (ord($bs) != $od_ord) { $b->[2] = 0;  next }
+        if (substr($bs, 0, 2) eq $var_tag && $bs =~ $re_var_full) {
+            my $inner = $1;
+            if (index($inner, '|') < 0) {
+                $b->[2] = 1;
+                $b->[3] = $inner;
+                $b->[4] = (index($inner, '.') >= 0) ? 1 : 0;
+            } else {
+                $b->[2] = 2;
+                $b->[3] = $inner;
+            }
+            next;
+        }
+        if (substr($bs, 0, $self->{_tag_if_len}) eq $tag_if
+            && substr($bs, -$self->{_tag_if_close_len}) eq $tag_if_close) {
+            $b->[2] = 3;
+            next;
+        }
+        if (substr($bs, 0, $self->{_tag_foreach_len}) eq $tag_foreach && $bs =~ $re_foreach) {
+            $b->[2] = 4;
+            $b->[3] = $1;
+            $b->[4] = $2;
+            $b->[5] = $3;
+            $b->[6] = $4;
+            next;
+        }
+        if (substr($bs, 0, $self->{_tag_include_len}) eq $tag_include) {
+            $b->[2] = 5;
+            next;
+        }
+        if (substr($bs, 0, $self->{_tag_literal_len}) eq $tag_literal && $bs =~ $re_literal) {
+            $b->[2] = 6;
+            $b->[3] = $1;
+            next;
+        }
+        if ($bs =~ $re_expr) {
+            $b->[2] = 7;
+            $b->[3] = $1;
+            next;
+        }
+        $b->[2] = 9;
+    }
+
     $self->{_blocks_cache}{$str} = \@blocks;
     return @blocks;
 }
@@ -704,79 +762,77 @@ sub _process_blocks {
     my $blocks = shift;
     my $out    = shift;  # Optional: ref to append output to (avoids temp string + concat)
 
-    my $od_ord = $self->{_od_ord};
-    my $od     = $self->{open_delim};
-    my $var_tag = "${od}\$";
-    my $var_re  = $self->{_re_var_simple};
+    # Blocks arrive pre-classified from _get_blocks (cached), so dispatch
+    # is a plain integer compare — no substr/regex per block per render.
+    # type: -1=empty 0=text 1=simple_var 2=mod_var 3=if 4=foreach
+    #        5=include 6=literal 7=expr 9=unknown (_process_block fallback)
 
     if ($out) {
         for my $x (@$blocks) {
-            my $block = $x->[0];
-            next unless length $block;
-            if (ord($block) != $od_ord) {
-                $$out .= $block;
-                next;
-            }
-            # Fast path: {$var} or {$var.dot} with no modifier — inline
-            # variable resolution, skip _process_block AND _variable_block
-            if (substr($block, 0, 2) eq $var_tag && index($block, '|') < 0
-                && $block =~ $var_re) {
-                my $var = $1;
-                my $val;
-                if (index($var, '.') < 0) {
-                    $val = $self->{tpl_vars}{$var};
-                } else {
-                    $val = $self->array_dive($var, $self->{tpl_vars});
-                }
-                if (ref $val eq 'ARRAY')  { $$out .= 'ARRAY' }
+            my $type = $x->[2] // 9;
+            if ($type == 0) {
+                $$out .= $x->[0];
+            } elsif ($type == 1) {
+                my $val = $x->[4] ? $self->array_dive($x->[3], $self->{tpl_vars})
+                                  : $self->{tpl_vars}{$x->[3]};
+                if (ref $val eq 'ARRAY')   { $$out .= 'ARRAY' }
                 elsif (ref $val eq 'HASH') { $$out .= 'HASH' }
                 elsif (defined $val)       { $$out .= ($self->{auto_escape} ? escape($val) : $val) }
-                next;
-            }
-            # If block fast path — skip _process_block dispatch (mirrors
-            # the $html branch so the $out path is equally fast).
-            if (substr($block, 0, $self->{_tag_if_len}) eq $self->{_tag_if}
-                && substr($block, -$self->{_tag_if_close_len}) eq $self->{_tag_if_close}) {
+            } elsif ($type == 3) {
                 $self->{char_pos} = $x->[1];
-                $$out .= $self->_if_block($block);
-                next;
+                $$out .= $self->_if_block($x->[0]);
+            } elsif ($type == 2) {
+                $self->{char_pos} = $x->[1];
+                $$out .= $self->_variable_block($x->[3]);
+            } elsif ($type == 4) {
+                $self->{char_pos} = $x->[1];
+                $$out .= $self->_foreach_block($x->[3], $x->[4], $x->[5], $x->[6]);
+            } elsif ($type == 6) {
+                $$out .= $x->[3];
+            } elsif ($type == 5) {
+                $self->{char_pos} = $x->[1];
+                $$out .= $self->_include_block($x->[0]);
+            } elsif ($type == 7) {
+                $self->{char_pos} = $x->[1];
+                $$out .= $self->_expression_block($x->[0], $x->[3]);
+            } elsif ($type != -1) {
+                $$out .= $self->_process_block($x->[0], $x->[1]);
             }
-            $$out .= $self->_process_block($block, $x->[1]);
         }
         return;
     }
 
     my $html = '';
     for my $x (@$blocks) {
-        my $block = $x->[0];
-        next unless length $block;
-        if (ord($block) != $od_ord) {
-            $html .= $block;
-            next;
-        }
-        # Fast path: {$var} or {$var.dot} with no modifier
-        if (substr($block, 0, 2) eq $var_tag && index($block, '|') < 0
-            && $block =~ $var_re) {
-            my $var = $1;
-            my $val;
-            if (index($var, '.') < 0) {
-                $val = $self->{tpl_vars}{$var};
-            } else {
-                $val = $self->array_dive($var, $self->{tpl_vars});
-            }
-            if (ref $val eq 'ARRAY')  { $html .= 'ARRAY' }
+        my $type = $x->[2] // 9;
+        if ($type == 0) {
+            $html .= $x->[0];
+        } elsif ($type == 1) {
+            my $val = $x->[4] ? $self->array_dive($x->[3], $self->{tpl_vars})
+                              : $self->{tpl_vars}{$x->[3]};
+            if (ref $val eq 'ARRAY')   { $html .= 'ARRAY' }
             elsif (ref $val eq 'HASH') { $html .= 'HASH' }
             elsif (defined $val)       { $html .= ($self->{auto_escape} ? escape($val) : $val) }
-            next;
-        }
-        # If block fast path — skip _process_block dispatch
-        if (substr($block, 0, $self->{_tag_if_len}) eq $self->{_tag_if}
-            && substr($block, -$self->{_tag_if_close_len}) eq $self->{_tag_if_close}) {
+        } elsif ($type == 3) {
             $self->{char_pos} = $x->[1];
-            $html .= $self->_if_block($block);
-            next;
+            $html .= $self->_if_block($x->[0]);
+        } elsif ($type == 2) {
+            $self->{char_pos} = $x->[1];
+            $html .= $self->_variable_block($x->[3]);
+        } elsif ($type == 4) {
+            $self->{char_pos} = $x->[1];
+            $html .= $self->_foreach_block($x->[3], $x->[4], $x->[5], $x->[6]);
+        } elsif ($type == 6) {
+            $html .= $x->[3];
+        } elsif ($type == 5) {
+            $self->{char_pos} = $x->[1];
+            $html .= $self->_include_block($x->[0]);
+        } elsif ($type == 7) {
+            $self->{char_pos} = $x->[1];
+            $html .= $self->_expression_block($x->[0], $x->[3]);
+        } elsif ($type != -1) {
+            $html .= $self->_process_block($x->[0], $x->[1]);
         }
-        $html .= $self->_process_block($block, $x->[1]);
     }
 
     return $html;
@@ -1004,36 +1060,18 @@ sub _foreach_block {
     $payload     = $self->ltrim_one($payload, "\n");
     my $blocks   = $self->_get_blocks_ref($payload);
 
-    # Pre-classify blocks for fast dispatch in the loop (cached in block arrays)
-    # type: -1=empty, 0=text, 1=simple_var, 2=if_block, 99=other
-    my $od     = $self->{open_delim};
-    my $od_ord = $self->{_od_ord};
-    for my $b (@$blocks) {
-        next if defined $b->[2];
-        my $bs = $b->[0];
-        if (!length $bs) {
-            $b->[2] = -1;
-        } elsif (ord($bs) != $od_ord) {
-            $b->[2] = 0;
-        } elsif (substr($bs, 0, 2) eq "${od}\$" && index($bs, '|') < 0
-                 && $bs =~ $self->{_re_var_simple}) {
-            $b->[2] = 1;
-            $b->[3] = $1;
-            $b->[4] = (index($1, '.') >= 0);
-        } elsif (substr($bs, 0, $self->{_tag_if_len}) eq $self->{_tag_if}
-                 && substr($bs, -$self->{_tag_if_close_len}) eq $self->{_tag_if_close}) {
-            $b->[2] = 2;
-        } else {
-            $b->[2] = 99;
-        }
-    }
+    # Blocks arrive pre-classified from _get_blocks (cached), so no
+    # per-render classification work is needed here.
+    # type: -1=empty 0=text 1=simple_var 2=mod_var 3=if 4=foreach
+    #        5=include 6=literal 7=expr 9=unknown (_process_block fallback)
 
     # Simple variable/text loops do not execute expressions, so __S does not
     # need to be updated for every item. This is especially useful for nested
-    # and large loops.
+    # and large loops. (Literals never reference variables either.)
     my $need_eval = 0;
     for my $b (@$blocks) {
-        if ($b->[2] == 2 || $b->[2] == 99) {
+        my $t = $b->[2];
+        if ($t != 0 && $t != 1 && $t != 6 && $t != -1) {
             $need_eval = 1;
             last;
         }
@@ -1123,12 +1161,26 @@ sub _foreach_block {
                 } elsif ($type == 1) {
                     my $var = $b->[3];
                     my $val = $b->[4] ? $self->array_dive($var, $tv) : $tv->{$var};
-                    if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
+                    if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
                     elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
-                } elsif ($type == 2) {
+                } elsif ($type == 3) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
+                } elsif ($type == 4) {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
+                } elsif ($type == 2) {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_variable_block($b->[3]);
+                } elsif ($type == 6) {
+                    $ret .= $b->[3];
+                } elsif ($type == 7) {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_expression_block($b->[0], $b->[3]);
+                } elsif ($type == 5) {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_include_block($b->[0]);
                 } elsif ($type != -1) {
                     $ret .= $self->_process_block($b->[0], $b->[1]);
                 }
@@ -1170,12 +1222,26 @@ sub _foreach_block {
                 } elsif ($type == 1) {
                     my $var = $b->[3];
                     my $val = $b->[4] ? $self->array_dive($var, $tv) : $tv->{$var};
-                    if (ref $val eq 'ARRAY')  { $ret .= 'ARRAY' }
+                    if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
                     elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
                     elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
-                } elsif ($type == 2) {
+                } elsif ($type == 3) {
                     $self->{char_pos} = $b->[1];
                     $ret .= $self->_if_block($b->[0]);
+                } elsif ($type == 4) {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
+                } elsif ($type == 2) {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_variable_block($b->[3]);
+                } elsif ($type == 6) {
+                    $ret .= $b->[3];
+                } elsif ($type == 7) {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_expression_block($b->[0], $b->[3]);
+                } elsif ($type == 5) {
+                    $self->{char_pos} = $b->[1];
+                    $ret .= $self->_include_block($b->[0]);
                 } elsif ($type != -1) {
                     $ret .= $self->_process_block($b->[0], $b->[1]);
                 }
