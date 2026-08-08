@@ -83,6 +83,7 @@ sub new {
         _mod_cache          => {}, # Cached resolved modifier coderefs keyed by func name
         _micro_cache        => {}, # Cached _micro_optimize shape classification (skips regex on repeat calls)
         _src_shape_cache    => {}, # Cached foreach source expression shapes (avoids _peval per render)
+        _mod_chain_cache    => {}, # Cached parsed modifier chains (crefs + literal params resolved once)
     };
 
     bless $self, $class;
@@ -205,6 +206,7 @@ sub set_delimiters {
     $self->{_verified_sub_cache} = {};
     $self->{_mod_cache}          = {};
     $self->{_src_shape_cache}    = {};
+    $self->{_mod_chain_cache}    = {};
 
     return;
 }
@@ -916,82 +918,47 @@ sub _variable_block {
         return '';
     }
 
-    if ($str =~ /(.+?)\|(.*)/) {
-        my $key = $1;
-        my $mod = $2;
+    # Modifier chains are parsed once per unique string (crefs resolved,
+    # literal params pre-evaluated) and cached; renders just walk the chain.
+    my $chain = $self->{_mod_chain_cache}{$str};
+    if (!$chain && $str =~ /(.+?)\|(.*)/) {
+        $chain = $self->_build_mod_chain($1, $2);
+        $self->{_mod_chain_cache}{$str} = $chain;
+    }
 
-        my $tmp        = $self->array_dive($key, $self->{tpl_vars});
-        my $is_nothing = (!defined $tmp || (defined $tmp && ref $tmp eq '' && !length $tmp && $tmp ne '0'));
-        my $is_default = index($mod, 'default:') >= 0;
+    if ($chain) {
+        my $tmp = $chain->{has_dot} ? $self->array_dive($chain->{key}, $self->{tpl_vars})
+                                    : $self->{tpl_vars}{$chain->{key}};
+        my $is_nothing = (!defined $tmp || (ref $tmp eq '' && !length $tmp && $tmp ne '0'));
 
-        if ($is_nothing && $is_default) {
-            my $dval = $mod;
-            $dval =~ s/^.*?default://;
-            my ($ret) = $self->_peval($dval);
-            if (defined $ret) { return $ret }
-            return '';
-        } elsif (!$is_nothing && $is_default) {
-            return $tmp // '';
-        } else {
+        if ($chain->{is_default}) {
             if ($is_nothing) {
+                my $ret = $self->_eval_shape($chain->{default_shape});
+                if (defined $ret) { return $ret }
                 return '';
             }
-            my $pre = $tmp;
-
-            my $seen_escape   = 0;
-			my $seen_noescape = 0;
-
-            # Split on | not inside double or single quotes (supports chained
-            # modifiers like {$x|uc|substr:0,3}). Regex precompiled in
-            # _precompute_tags to avoid per-call recompile cost.
-            my $pipe_re = $self->{_pipe_re};
-            for my $m_part (split $pipe_re, $mod) {
-                my @x    = split /:/, $m_part, 2;
-                my $func = $x[0] // '';
-                if ($func eq 'escape')   { $seen_escape   = 1 }
-                if ($func eq 'noescape') { $seen_noescape = 1 }
-                my $param_str = $x[1] // '';
-                my @params = ($pre);
-
-                if (length $param_str) {
-                    # Split on commas not inside double or single quotes
-                    # (parameter separator in modifier calls like substr:2,2)
-                    my @new = map {
-                        my ($v) = $self->_peval($_);
-                        $v;
-                    } split $self->{_comma_re}, $param_str;
-                    push @params, @new;
-                }
-
-                # Resolve the modifier coderef once per func name and cache it.
-                # Priority: main::, current package (Template::Sluz built-ins),
-                # then CORE:: built-in operators.
-                my $cref = $self->{_mod_cache}{$func};
-                if (!defined $cref) {
-                    no strict 'refs';
-                    if    (defined &{"main::$func"}) { $cref = \&{"main::$func"} }
-                    elsif (defined &{$func})         { $cref = \&{$func} }
-                    elsif (defined &{"CORE::$func"}) { $cref = \&{"CORE::$func"} }
-                    else                            { $cref = 0 }
-                    $self->{_mod_cache}{$func} = $cref;
-                }
-
-                if (!$cref) {
-                    my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-                    $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
-                }
-
-                $pre = eval { $cref->(@params) };
-                if ($@) {
-                    $self->_error_out("Exception: $@", 79134);
-                }
-            }
-
-            if ($self->{auto_escape} && !$seen_noescape && !$seen_escape) {
-                return escape($pre);
-            }
-            return $pre;
+            return $tmp // '';
         }
+
+        if ($is_nothing) { return '' }
+
+        my $pre = $tmp;
+        for my $step (@{$chain->{steps}}) {
+            my @params = ($pre);
+            for my $sh (@{$step->[1]}) {
+                if ($sh->[0] == 3) { push @params, $sh->[1] }
+                else               { push @params, $self->_eval_shape($sh) }
+            }
+            $pre = eval { $step->[0]->(@params) };
+            if ($@) {
+                $self->_error_out("Exception: $@", 79134);
+            }
+        }
+
+        if ($self->{auto_escape} && !$chain->{seen_noescape} && !$chain->{seen_escape}) {
+            return escape($pre);
+        }
+        return $pre;
     }
 
     my $ret = $self->array_dive($str, $self->{tpl_vars});
@@ -999,6 +966,80 @@ sub _variable_block {
     if (ref $ret eq 'HASH')  { return 'HASH' }
     if (defined $ret) { return ($self->{auto_escape} ? escape($ret) : $ret) }
     return '';
+}
+
+# Parse a "var|mod|mod:args" string into a cached chain:
+#   { key, has_dot, is_default, default_shape, steps, seen_escape, seen_noescape }
+# Each step is [cref, [param shapes...]]. Params that classify as literals
+# are resolved once at build time (shape kind 3); the rest keep their shape
+# for live evaluation each render.
+sub _build_mod_chain {
+    my $self = shift;
+    my $key  = shift;
+    my $mod  = shift;
+
+    my $chain = {
+        key     => $key,
+        has_dot => (index($key, '.') >= 0) ? 1 : 0,
+    };
+
+    if (index($mod, 'default:') >= 0) {
+        my $dval = $mod;
+        $dval =~ s/^.*?default://;
+        $chain->{is_default}    = 1;
+        $chain->{default_shape} = $self->_shape_of($dval);
+        return $chain;
+    }
+
+    my @steps;
+    my $seen_escape   = 0;
+    my $seen_noescape = 0;
+
+    # Split on | not inside double or single quotes (supports chained
+    # modifiers like {$x|uc|substr:0,3}). Regex precompiled in
+    # _precompute_tags to avoid per-call recompile cost.
+    my $pipe_re = $self->{_pipe_re};
+    for my $m_part (split $pipe_re, $mod) {
+        my @x    = split /:/, $m_part, 2;
+        my $func = $x[0] // '';
+        if ($func eq 'escape')   { $seen_escape   = 1 }
+        if ($func eq 'noescape') { $seen_noescape = 1 }
+        my $param_str = $x[1] // '';
+        my @shapes;
+
+        if (length $param_str) {
+            # Split on commas not inside double or single quotes
+            # (parameter separator in modifier calls like substr:2,2)
+            for my $p (split $self->{_comma_re}, $param_str) {
+                push @shapes, $self->_shape_of($p);
+            }
+        }
+
+        # Resolve the modifier coderef once per func name and cache it.
+        # Priority: main::, current package (Template::Sluz built-ins),
+        # then CORE:: built-in operators.
+        my $cref = $self->{_mod_cache}{$func};
+        if (!defined $cref) {
+            no strict 'refs';
+            if    (defined &{"main::$func"}) { $cref = \&{"main::$func"} }
+            elsif (defined &{$func})         { $cref = \&{$func} }
+            elsif (defined &{"CORE::$func"}) { $cref = \&{"CORE::$func"} }
+            else                            { $cref = 0 }
+            $self->{_mod_cache}{$func} = $cref;
+        }
+
+        if (!$cref) {
+            my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+            $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
+        }
+
+        push @steps, [$cref, \@shapes];
+    }
+
+    $chain->{steps}        = \@steps;
+    $chain->{seen_escape}   = $seen_escape;
+    $chain->{seen_noescape} = $seen_noescape;
+    return $chain;
 }
 
 sub _if_block {
