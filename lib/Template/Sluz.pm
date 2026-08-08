@@ -82,6 +82,7 @@ sub new {
         _verified_sub_cache => {}, # Cached subs that succeeded once — skip eval/SIG overhead
         _mod_cache          => {}, # Cached resolved modifier coderefs keyed by func name
         _micro_cache        => {}, # Cached _micro_optimize shape classification (skips regex on repeat calls)
+        _src_shape_cache    => {}, # Cached foreach source expression shapes (avoids _peval per render)
     };
 
     bless $self, $class;
@@ -203,6 +204,7 @@ sub set_delimiters {
     $self->{_sub_cache}          = {};
     $self->{_verified_sub_cache} = {};
     $self->{_mod_cache}          = {};
+    $self->{_src_shape_cache}    = {};
 
     return;
 }
@@ -1023,17 +1025,34 @@ sub _if_block {
             @rules   = $self->_if_rules_from_tokens(\@toks);
         }
 
+        # Pre-resolve each condition's shape once so renders skip
+        # _convert_vars/_micro_optimize/_peval for simple conditions.
+        push @$_, $self->_shape_of($_->[0]) for @rules;
+
         $rules = \@rules;
         $self->{_if_rules_cache}{$str} = $rules;
     }
 
     my $ret = '';
+    my $tv  = $self->{tpl_vars};
     for my $rule (@$rules) {
-        my $raw = $rule->[0];
-        # Inline _convert_vars for cached expressions — saves method call per iteration
-        my $test = (index($raw, '$') < 0) ? $raw :
-                   ($self->{_convert_cache}{$raw} // $self->_convert_vars($raw));
-        my ($res) = $self->_peval($test);
+        my $shape = $rule->[2];
+        my $kind  = $shape->[0];
+        my $res;
+        if ($kind == 1) {
+            my ($neg, $key) = @{$shape->[1]};
+            if (exists $tv->{$key}) {
+                $res = $neg ? !$tv->{$key} : $tv->{$key};
+            } else {
+                ($res) = $self->_peval($shape->[1][2]);
+            }
+        } elsif ($kind == 2) {
+            $res = $self->_micro_compare($shape->[1], $tv->{$shape->[1][1]});
+        } elsif ($kind == 3) {
+            $res = $shape->[1];
+        } else {
+            ($res) = $self->_peval($shape->[1]);
+        }
         if ($res) {
             my $payload = $rule->[1];
             # Inline _get_blocks for cached payloads. Pass \$ret to
@@ -1056,7 +1075,6 @@ sub _foreach_block {
     my $oval     = shift;
     my $payload  = shift;
 
-    my $conv_src = $self->_convert_vars($src_expr);
     $payload     = $self->ltrim_one($payload, "\n");
     my $blocks   = $self->_get_blocks_ref($payload);
 
@@ -1077,7 +1095,11 @@ sub _foreach_block {
         }
     }
 
-    my ($src) = $self->_peval($conv_src);
+    # Resolve the loop source via its cached shape — simple variable
+    # sources skip _convert_vars/_peval entirely on every render.
+    my $shape = $self->{_src_shape_cache}{$src_expr}
+             // ($self->{_src_shape_cache}{$src_expr} = $self->_shape_of($src_expr));
+    my $src = $self->_eval_shape($shape);
 
     if (!defined $src) {
         $src = [];
@@ -1492,6 +1514,57 @@ sub _micro_compare {
 
     return $op eq 'eq' ? $left eq $right
         :                $left ne $right;
+}
+
+# Classify a raw expression into a cached shape tuple so hot paths can
+# resolve it without calling _peval. Classification is pure (regex +
+# tpl_vars lookups only), so it is safe to run at cache-build time.
+# Returns: [3, literal] | [1, [neg, key, converted]] | [2, cmp_entry]
+#          [0, converted]
+# The var shape keeps the converted string because a missing key must
+# fall back to _peval (e.g. !$missing_var is true via eval, not undef).
+sub _shape_of {
+    my $self = shift;
+    my $raw  = shift // '';
+
+    my $conv = (index($raw, '$') < 0) ? $raw : $self->_convert_vars($raw);
+
+    $self->_micro_optimize($conv); # populate _micro_cache with the shape
+    my $e = $self->{_micro_cache}{$conv};
+    if ($e) {
+        my $t = $e->[0];
+        if ($t eq 'lit') { return [3, $e->[1]] }
+        if ($t eq 'var') { return [1, [$e->[1], $e->[2], $conv]] }
+        if ($t eq 'cmp') { return [2, $e] }
+    }
+    return [0, $conv];
+}
+
+# Evaluate a shape tuple against the live tpl_vars. Mirrors the
+# _micro_optimize/_peval semantics exactly.
+sub _eval_shape {
+    my $self  = shift;
+    my $shape = shift;
+    my $tv    = $self->{tpl_vars};
+
+    my $kind = $shape->[0];
+    if ($kind == 1) {
+        my ($neg, $key) = @{$shape->[1]};
+        if (exists $tv->{$key}) {
+            my $v = $neg ? !$tv->{$key} : $tv->{$key};
+            if (defined $v) { return $v }
+        }
+        my ($ret) = $self->_peval($shape->[1][2]);
+        return $ret;
+    }
+    if ($kind == 2) {
+        return $self->_micro_compare($shape->[1], $tv->{$shape->[1][1]});
+    }
+    if ($kind == 3) {
+        return $shape->[1];
+    }
+    my ($ret) = $self->_peval($shape->[1]);
+    return $ret;
 }
 
 sub _peval {
