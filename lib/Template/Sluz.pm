@@ -268,11 +268,15 @@ sub escape {
     if (ref $str eq 'ARRAY') { return 'ARRAY' }
     if (ref $str eq 'HASH')  { return 'HASH' }
 
-    $str =~ s/&/&amp;/g;
-    $str =~ s/</&lt;/g;
-    $str =~ s/>/&gt;/g;
-    $str =~ s/"/&quot;/g;
-    $str =~ s/'/&#x27;/g;
+    # Most values carry no special characters; one detection scan skips
+    # all five substitution passes in the common case.
+    if ($str =~ /[<>&"']/) {
+        $str =~ s/&/&amp;/g;
+        $str =~ s/</&lt;/g;
+        $str =~ s/>/&gt;/g;
+        $str =~ s/"/&quot;/g;
+        $str =~ s/'/&#x27;/g;
+    }
 
     return $str;
 }
