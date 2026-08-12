@@ -103,7 +103,7 @@ sub assign {
     if (@_ == 1 && ref $_[0] eq 'HASH') {
         my $h = shift;
         @{$self->{tpl_vars}}{keys %$h} = values %$h;
-        for my $k (keys %$h) {
+        foreach my $k (keys %$h) {
             $self->{__S}{"${pfx}_$k"} = $h->{$k};
         }
 
@@ -111,7 +111,7 @@ sub assign {
     } elsif (@_ % 2 == 0) {
         my %h = @_;
         @{$self->{tpl_vars}}{keys %h} = values %h;
-        for my $k (keys %h) {
+        foreach my $k (keys %h) {
             $self->{__S}{"${pfx}_$k"} = $h{$k};
         }
     } else {
@@ -248,7 +248,7 @@ sub array_dive {
              // ($self->{_dive_parts_cache}{$needle} = [split /\./, $needle]);
     my $arr   = $haystack;
 
-    for my $elem (@$parts) {
+    foreach my $elem (@$parts) {
         if (!defined $arr) { return undef }
         if (ref $arr eq 'ARRAY') {
             if (!($elem =~ /^\d+$/ && $elem < @$arr)) { return undef }
@@ -331,7 +331,7 @@ sub find_ending_tag {
     my $close_len = length $close_tag;
     my $offset    = $pos + $close_len;
 
-    for (0 .. 4) {
+    foreach (0 .. 4) {
         $pos = index($haystack, $close_tag, $offset);
         if ($pos < 0) { return undef }
 
@@ -616,7 +616,7 @@ sub _get_blocks {
 
             if ($matched_block) {
                 my $close_tag = "${od}/${matched_block}${cd}";
-                for (my $j = $i + 1; $j < length $str; $j++) {
+                foreach my $j (($i + 1) .. (length($str) - 1)) {
                     if (substr($str, $j, 1) eq $cd) {
                         my $tmp = substr($str, $start, $j - $start + 1);
                         my $oc  = () = $tmp =~ /\Q${od}${matched_block}\E/g;
@@ -721,7 +721,7 @@ sub _get_blocks {
     # whitespace noise.
     my $prev_is_if = 0;
     my $tag_foreach_close = $self->{_tag_foreach_close};
-    for my $i (0 .. $#blocks) {
+    foreach my $i (0 .. $#blocks) {
         my $bstr     = $blocks[$i][0] // '';
         my $cur_is_if = (index($bstr, $tag_if) == 0 || index($bstr, $tag_foreach) == 0);
         if ($prev_is_if) {
@@ -748,7 +748,7 @@ sub _get_blocks {
     my $re_foreach   = $self->{_re_foreach};
     my $re_literal   = $self->{_re_literal};
     my $re_expr      = $self->{_re_expr};
-    for my $b (@blocks) {
+    foreach my $b (@blocks) {
         my $bs = $b->[0];
         if (!length $bs)         { $b->[2] = -1; next }
         if (ord($bs) != $od_ord) { $b->[2] = 0;  next }
@@ -822,7 +822,7 @@ sub _process_blocks {
     #        5=include 6=literal 7=expr 9=unknown (_process_block fallback)
 
     if ($out) {
-        for my $x (@$blocks) {
+        foreach my $x (@$blocks) {
             my $type = $x->[2] // 9;
             if ($type == 0) {
                 $$out .= $x->[0];
@@ -857,7 +857,7 @@ sub _process_blocks {
     }
 
     my $html = '';
-    for my $x (@$blocks) {
+    foreach my $x (@$blocks) {
         my $type = $x->[2] // 9;
         if ($type == 0) {
             $html .= $x->[0];
@@ -993,9 +993,9 @@ sub _variable_block {
         if ($is_nothing) { return '' }
 
         my $pre = $tmp;
-        for my $step (@{$chain->{steps}}) {
+        foreach my $step (@{$chain->{steps}}) {
             my @params = ($pre);
-            for my $sh (@{$step->[1]}) {
+            foreach my $sh (@{$step->[1]}) {
                 if ($sh->[0] == 3) { push @params, $sh->[1] }
                 else               { push @params, $self->_eval_shape($sh) }
             }
@@ -1049,7 +1049,7 @@ sub _build_mod_chain {
     # modifiers like {$x|uc|substr:0,3}). Regex precompiled in
     # _precompute_tags to avoid per-call recompile cost.
     my $pipe_re = $self->{_pipe_re};
-    for my $m_part (split $pipe_re, $mod) {
+    foreach my $m_part (split $pipe_re, $mod) {
         my @x    = split /:/, $m_part, 2;
         my $func = $x[0] // '';
         if ($func eq 'escape')   { $seen_escape   = 1 }
@@ -1060,7 +1060,7 @@ sub _build_mod_chain {
         if (length $param_str) {
             # Split on commas not inside double or single quotes
             # (parameter separator in modifier calls like substr:2,2)
-            for my $p (split $self->{_comma_re}, $param_str) {
+            foreach my $p (split $self->{_comma_re}, $param_str) {
                 push @shapes, $self->_shape_of($p);
             }
         }
@@ -1118,7 +1118,9 @@ sub _if_block {
 
         # Pre-resolve each condition's shape once so renders skip
         # _convert_vars/_micro_optimize/_peval for simple conditions.
-        push @$_, $self->_shape_of($_->[0]) for @rules;
+        foreach my $rule (@rules) {
+            push @$rule, $self->_shape_of($rule->[0]);
+        }
 
         $rules = \@rules;
         $self->{_if_rules_cache}{$str} = $rules;
@@ -1126,7 +1128,8 @@ sub _if_block {
 
     my $ret = '';
     my $tv  = $self->{tpl_vars};
-    for my $rule (@$rules) {
+
+    foreach my $rule (@$rules) {
         my $shape = $rule->[2];
         my $kind  = $shape->[0];
         my $res;
@@ -1270,7 +1273,7 @@ sub _foreach_block {
     if (ref $src eq 'ARRAY') {
         my $last = $#$src;
         if (defined $oval) {
-            for my $i (0 .. $last) {
+            foreach my $i (0 .. $last) {
                 if ($need_first) {
                     my $v = ($idx == 0) ? 1 : 0;
                     $tv->{__FOREACH_FIRST} = $v;
@@ -1294,7 +1297,7 @@ sub _foreach_block {
                 # Inline block processing with pre-classified types — no
                 # substr/regex work per iteration. Simple vars naming a
                 # loop variable are served from $v_key/$v_val directly.
-                for my $b (@$blocks) {
+                foreach my $b (@$blocks) {
                     my $type = $b->[2];
                     if ($type == 0) {
                         $ret .= $b->[0];
@@ -1336,7 +1339,7 @@ sub _foreach_block {
                 $idx++;
             }
         } else {
-            for my $i (0 .. $last) {
+            foreach my $i (0 .. $last) {
                 if ($need_first) {
                     my $v = ($idx == 0) ? 1 : 0;
                     $tv->{__FOREACH_FIRST} = $v;
@@ -1354,7 +1357,7 @@ sub _foreach_block {
                 my $v_key = $src->[$i];
                 $tv->{$okey} = $v_key if !$skip_key_write;
                 $ks->{$okey_ks} = $v_key if $need_eval;
-                for my $b (@$blocks) {
+                foreach my $b (@$blocks) {
                     my $type = $b->[2];
                     if ($type == 0) {
                         $ret .= $b->[0];
@@ -1398,7 +1401,7 @@ sub _foreach_block {
         my @keys = sort keys %$src;
         my $last = $#keys;
         if (defined $oval) {
-            for my $i (0 .. $last) {
+            foreach my $i (0 .. $last) {
                 my $k = $keys[$i];
                 if ($need_first) {
                     my $v = ($idx == 0) ? 1 : 0;
@@ -1420,7 +1423,7 @@ sub _foreach_block {
                 $tv->{$oval} = $v_val if !$skip_val_write;
                 $ks->{$okey_ks} = $v_key if $need_eval;
                 $ks->{$oval_ks} = $v_val if $need_eval;
-                for my $b (@$blocks) {
+                foreach my $b (@$blocks) {
                     my $type = $b->[2];
                     if ($type == 0) {
                         $ret .= $b->[0];
@@ -1462,7 +1465,7 @@ sub _foreach_block {
                 $idx++;
             }
         } else {
-            for my $i (0 .. $last) {
+            foreach my $i (0 .. $last) {
                 my $k = $keys[$i];
                 if ($need_first) {
                     my $v = ($idx == 0) ? 1 : 0;
@@ -1481,7 +1484,7 @@ sub _foreach_block {
                 my $v_key = $src->{$k};
                 $tv->{$okey} = $v_key if !$skip_key_write;
                 $ks->{$okey_ks} = $v_key if $need_eval;
-                for my $b (@$blocks) {
+                foreach my $b (@$blocks) {
                     my $type = $b->[2];
                     if ($type == 0) {
                         $ret .= $b->[0];
@@ -1524,7 +1527,7 @@ sub _foreach_block {
     }
 
     # Restore only the keys we modified
-    for my $i (0 .. $#tpl_keys) {
+    foreach my $i (0 .. $#tpl_keys) {
         if ($tpl_exists[$i]) {
             $self->{tpl_vars}{$tpl_keys[$i]} = $tpl_vals[$i];
         } else {
@@ -1532,7 +1535,7 @@ sub _foreach_block {
         }
     }
     if ($need_eval) {
-        for my $i (0 .. $#ks_keys) {
+        foreach my $i (0 .. $#ks_keys) {
             if ($ks_exists[$i]) {
                 $self->{__S}{$ks_keys[$i]} = $ks_vals[$i];
             } else {
@@ -1652,7 +1655,8 @@ sub _dot_to_bracket_cb {
     my $first = shift @parts;
     my $var   = substr($first, 1);
     my $res   = "\$__S->\{$self->{var_prefix}_$var\}";
-    for my $p (@parts) {
+
+    foreach my $p (@parts) {
         if ($p =~ /^\d+$/) {
             $res .= "->[$p]";
         } else {
@@ -1963,7 +1967,7 @@ sub _if_rules_from_tokens {
     my $tifc_tag = $self->{_tag_if_close};
     my $tif_prefix = $self->{open_delim} . 'if';
 
-    for my $i (0 .. $num - 1) {
+    foreach my $i (0 .. $num - 1) {
         my $item = $toks->[$i];
         if (index($item, $tif_prefix) == 0) { $nested++ }
         if ($item eq $tifc_tag) { $nested-- }
@@ -1979,7 +1983,7 @@ sub _if_rules_from_tokens {
     $tmp[$num - 1] = 1;
 
     my @conds;
-    for my $i (0 .. $num - 1) {
+    foreach my $i (0 .. $num - 1) {
         if ($tmp[$i]) {
             my $test = $self->is_if_token($toks->[$i]);
             if ($i != $num - 1) { push @conds, $test }
@@ -1989,7 +1993,8 @@ sub _if_rules_from_tokens {
     my $str    = '';
     my @payloads;
     my $first  = 1;
-    for my $i (0 .. $num - 1) {
+
+    foreach my $i (0 .. $num - 1) {
         if ($tmp[$i]) {
             if (!$first) { push @payloads, $str }
             $first = 0;
@@ -2004,10 +2009,14 @@ sub _if_rules_from_tokens {
     }
 
     my @ret;
-    push @ret, [$conds[$_], $payloads[$_]] for 0 .. $#conds;
-    for my $rule (@ret) {
+    foreach my $x (0 .. $#conds) {
+        push @ret, [$conds[$x], $payloads[$x]];
+    }
+
+    foreach my $rule (@ret) {
         $rule->[1] = $self->ltrim_one($rule->[1], "\n");
     }
+
     return @ret;
 }
 
