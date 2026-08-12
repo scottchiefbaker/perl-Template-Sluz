@@ -1187,16 +1187,24 @@ sub _foreach_block {
     my $need_eval      = 0;
     my $skip_key_write = 1;
     my $skip_val_write = 1;
-    for my $b (@$blocks) {
+
+    foreach my $b (@$blocks) {
         my $t = $b->[2];
         if ($t != 0 && $t != 1 && $t != 6 && $t != -1) {
             $need_eval      = 1;
             $skip_key_write = 0;
             $skip_val_write = 0;
         } elsif ($t == 1 && $b->[4]) {
-            my $var = $b->[3];
-            my $d   = index($var, '.');
-            my $root = $d < 0 ? $var : substr($var, 0, $d);
+            my $var  = $b->[3];
+            my $d    = index($var, '.');
+            my $root;
+
+            if ($d < 0) {
+                $root = $var;
+            } else {
+                $root = substr($var, 0, $d);
+            }
+
             if ($root eq $okey)                  { $skip_key_write = 0 }
             if (defined $oval && $root eq $oval) { $skip_val_write = 0 }
         }
@@ -1749,16 +1757,18 @@ sub _micro_compare {
 
     no warnings;
     if ($numeric) {
-        return $op eq '==' ? $left == $right
-            : $op eq '!=' ? $left != $right
-            : $op eq '>=' ? $left >= $right
-            : $op eq '<=' ? $left <= $right
-            : $op eq '>'  ? $left >  $right
-            :                $left <  $right;
+        if ($op eq '==') { return $left == $right }
+        if ($op eq '!=') { return $left != $right }
+        if ($op eq '>=') { return $left >= $right }
+        if ($op eq '<=') { return $left <= $right }
+        if ($op eq '>')  { return $left >  $right }
+
+        return $left < $right;
     }
 
-    return $op eq 'eq' ? $left eq $right
-        :                $left ne $right;
+    if ($op eq 'eq') { return $left eq $right }
+
+    return $left ne $right;
 }
 
 # Classify a raw expression into a cached shape tuple so hot paths can
