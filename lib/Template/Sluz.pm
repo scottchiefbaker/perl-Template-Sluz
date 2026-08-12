@@ -35,13 +35,13 @@ our $VERSION = 'v0.9.7';
 sub count {
     my $v = shift;
 
-	if (ref $v eq 'ARRAY') {
-		return scalar @$v;
-	}
+    if (ref $v eq 'ARRAY') {
+        return scalar @$v;
+    }
 
-	if (ref $v eq 'HASH') {
-		return scalar(keys %$v);
-	}
+    if (ref $v eq 'HASH') {
+        return scalar(keys %$v);
+    }
 
     if (defined $v) { return 1 }
 
@@ -116,7 +116,7 @@ sub assign {
         }
     } else {
         $self->_error_out("Invalid assign. Must be a key/value or hash", 18956);
-	}
+    }
 }
 
 sub fetch {
@@ -323,6 +323,7 @@ sub find_ending_tag {
     if ($pos < 0) { return undef }
 
     my $substr     = substr($haystack, 0, $pos);
+    # () = forces list context so $open_count is the match count
     my $open_count = () = $substr =~ /\Q$open_tag\E/g;
     if ($open_count == 1) { return $pos }
 
@@ -335,9 +336,12 @@ sub find_ending_tag {
         $pos = index($haystack, $close_tag, $offset);
         if ($pos < 0) { return undef }
 
-        $substr         = substr($haystack, 0, $pos + 2);
+        $substr = substr($haystack, 0, $pos + 2);
+
+        # () = forces list context so $open_count is the match count
         $open_count     = () = $substr =~ /\Q$open_tag\E/g;
         my $close_count = () = $substr =~ /\Q$close_tag\E/g;
+
         if ($open_count == $close_count) { return $pos }
 
         $offset = $pos + $close_len;
@@ -349,24 +353,34 @@ sub find_ending_tag {
 sub get_tokens {
     my $self = shift;
     my $str  = shift // '';
+
     my $o = quotemeta($self->{open_delim});
     my $c = quotemeta($self->{close_delim});
+
+    # split into text/block tokens; capture keeps the {..} blocks
     my @tokens = split /($o[^$c]+$c)/, $str;
-    @tokens = grep { defined && length } @tokens;
+    @tokens    = grep { defined && length } @tokens;
+
     return @tokens;
 }
 
 sub is_if_token {
     my $self = shift;
     my $str  = shift // '';
-    if ($str eq $self->{_tag_else})   { return 1 }
+
+    if ($str eq $self->{_tag_else})     { return 1 }
     if ($str eq $self->{_tag_if_close}) { return 1 }
+
+    # Token starts with '{if ' or '{elseif ', i.e. an opening conditional tag
     if (index($str, $self->{_tag_if}) == 0 || index($str, $self->{_tag_elseif}) == 0) {
         my $inner = substr($str, length($self->{open_delim}));
+
         $inner =~ s/^\S+\s+//;  # strip 'if ' or 'elseif '
         $inner =~ s/\Q$self->{close_delim}\E$//;
+
         return $inner;
     }
+
     return '';
 }
 
@@ -455,6 +469,7 @@ sub _get_perl_file {
 sub _get_tpl_content {
     my $self     = shift;
     my $tpl_file = shift // '';
+
     $self->{tpl_file} = $tpl_file;
     my $tf = $tpl_file;
 
@@ -500,18 +515,18 @@ sub _get_inline_content {
     my $self = shift;
     my $file = shift;
 
-	# Check if it's cached
+    # Check if it's cached
     if (exists $self->{_inline_cache}{$file}) {
         return @{ $self->{_inline_cache}{$file} };
     }
 
-	# Slurp in the whole file
+    # Slurp in the whole file
     local $/;
     open my $fh, '<', $file or return undef;
     my $str = <$fh>;
     close $fh;
 
-	# Look for the __DATA__ offset
+    # Look for the __DATA__ offset
     my $idx = index($str, '__DATA__');
     if ($idx < 0) { return undef }
 
@@ -683,8 +698,8 @@ sub _get_blocks {
             }
 
             if (length($block)) {
-				push @blocks, [$block, $i]
-			}
+                push @blocks, [$block, $i]
+            }
 
             $start += $orig_block_len;
             $i      = $start;
@@ -1052,8 +1067,10 @@ sub _build_mod_chain {
     foreach my $m_part (split $pipe_re, $mod) {
         my @x    = split /:/, $m_part, 2;
         my $func = $x[0] // '';
+
         if ($func eq 'escape')   { $seen_escape   = 1 }
         if ($func eq 'noescape') { $seen_noescape = 1 }
+
         my $param_str = $x[1] // '';
         my @shapes;
 
@@ -1071,10 +1088,12 @@ sub _build_mod_chain {
         my $cref = $self->{_mod_cache}{$func};
         if (!defined $cref) {
             no strict 'refs';
+
             if    (defined &{"main::$func"}) { $cref = \&{"main::$func"} }
-            elsif (defined &{$func})         { $cref = \&{$func} }
+            elsif (defined &{$func})         { $cref = \&{$func}         }
             elsif (defined &{"CORE::$func"}) { $cref = \&{"CORE::$func"} }
-            else                            { $cref = 0 }
+            else                             { $cref = 0                 }
+
             $self->{_mod_cache}{$func} = $cref;
         }
 
@@ -1086,7 +1105,7 @@ sub _build_mod_chain {
         push @steps, [$cref, \@shapes];
     }
 
-    $chain->{steps}        = \@steps;
+    $chain->{steps}         = \@steps;
     $chain->{seen_escape}   = $seen_escape;
     $chain->{seen_noescape} = $seen_noescape;
     return $chain;
@@ -1100,16 +1119,18 @@ sub _if_block {
     if (!$rules) {
         my $od = $self->{open_delim};
         my $cd = $self->{close_delim};
+
         my $isimple_start = length($od) + 1;
-        my $else_check = $od . 'else';
-        my $is_simple = index($str, $else_check, $isimple_start) < 0;
+        my $else_check    = $od . 'else';
+        my $is_simple     = index($str, $else_check, $isimple_start) < 0;
 
         my @rules;
         if ($is_simple) {
             $str =~ $self->{_re_if_simple};
             my $cond    = $1 // '';
             my $payload = $2 // '';
-            $payload = $self->ltrim_one($payload, "\n");
+            $payload    = $self->ltrim_one($payload, "\n");
+
             @rules = ([$cond, $payload]);
         } else {
             my @toks = $self->get_tokens($str);
@@ -1133,6 +1154,7 @@ sub _if_block {
         my $shape = $rule->[2];
         my $kind  = $shape->[0];
         my $res;
+
         if ($kind == 1) {
             my ($neg, $key) = @{$shape->[1]};
             if (exists $tv->{$key}) {
@@ -1147,14 +1169,18 @@ sub _if_block {
         } else {
             ($res) = $self->_peval($shape->[1]);
         }
+
         if ($res) {
             my $payload = $rule->[1];
+
             # Inline _get_blocks for cached payloads. Pass \$ret to
             # _process_blocks so it appends directly — avoids a temp
             # string allocation + concat per if-payload render.
-            my $cached = $self->{_blocks_cache}{$payload};
+            my $cached    = $self->{_blocks_cache}{$payload};
             my $in_blocks = $cached ? $cached : [$self->_get_blocks($payload)];
+
             $self->_process_blocks($in_blocks, \$ret);
+
             last;
         }
     }
@@ -1169,8 +1195,8 @@ sub _foreach_block {
     my $oval     = shift;
     my $payload  = shift;
 
-    $payload     = $self->ltrim_one($payload, "\n");
-    my $blocks   = $self->_get_blocks_ref($payload);
+    $payload   = $self->ltrim_one($payload, "\n");
+    my $blocks = $self->_get_blocks_ref($payload);
 
     # Blocks arrive pre-classified from _get_blocks (cached), so no
     # per-render classification work is needed here.
@@ -1193,6 +1219,7 @@ sub _foreach_block {
 
     foreach my $b (@$blocks) {
         my $t = $b->[2];
+
         if ($t != 0 && $t != 1 && $t != 6 && $t != -1) {
             $need_eval      = 1;
             $skip_key_write = 0;
@@ -1225,7 +1252,7 @@ sub _foreach_block {
         $src = [$src];
     }
 
-    my $pfx      = $self->{var_prefix};
+    my $pfx = $self->{var_prefix};
 
     # Precompute __S keys for the loop variables
     my $okey_ks   = "${pfx}_$okey";
@@ -1279,21 +1306,26 @@ sub _foreach_block {
                     $tv->{__FOREACH_FIRST} = $v;
                     $ks->{$first_ks}       = $v if $need_eval;
                 }
+
                 if ($need_last) {
                     my $v = ($idx == $last) ? 1 : 0;
                     $tv->{__FOREACH_LAST} = $v;
                     $ks->{$last_ks}       = $v if $need_eval;
                 }
+
                 if ($need_index) {
                     $tv->{__FOREACH_INDEX} = $idx;
                     $ks->{$index_ks}       = $idx if $need_eval;
                 }
+
                 my $v_key = $i;
                 my $v_val = $src->[$i];
-                $tv->{$okey} = $v_key if !$skip_key_write;
-                $tv->{$oval} = $v_val if !$skip_val_write;
+
+                $tv->{$okey}    = $v_key if !$skip_key_write;
+                $tv->{$oval}    = $v_val if !$skip_val_write;
                 $ks->{$okey_ks} = $v_key if $need_eval;
                 $ks->{$oval_ks} = $v_val if $need_eval;
+
                 # Inline block processing with pre-classified types — no
                 # substr/regex work per iteration. Simple vars naming a
                 # loop variable are served from $v_key/$v_val directly.
@@ -1534,6 +1566,7 @@ sub _foreach_block {
             delete $self->{tpl_vars}{$tpl_keys[$i]};
         }
     }
+
     if ($need_eval) {
         foreach my $i (0 .. $#ks_keys) {
             if ($ks_exists[$i]) {
@@ -1561,9 +1594,12 @@ sub _include_block {
     while ($str =~ m/(\w+)=(['"](.+?)['"])/g) {
         my $key = $1;
         my $val = $2;
+
         if ($key eq 'file') { next }
-        $val = $self->_convert_vars($val);
+
+        $val      = $self->_convert_vars($val);
         my ($res) = $self->_peval($val);
+
         if (defined $res) {
             $self->assign($key => $res);
         } else {
@@ -1577,6 +1613,7 @@ sub _include_block {
         $self->_error_out("Unable to load include template <code>$inc_tpl</code> in <code>$file</code> on line #$line", 18485);
     }
 
+    # Slurp up the TPL content
     local $/;
     open my $fh, '<', $inc_tpl or $self->_error_out("Cannot open <code>$inc_tpl</code>: $!", 63579);
     my $content = <$fh>;
@@ -1792,10 +1829,12 @@ sub _shape_of {
     my $e = $self->{_micro_cache}{$conv};
     if ($e) {
         my $t = $e->[0];
-        if ($t eq 'lit') { return [3, $e->[1]] }
+
+        if ($t eq 'lit') { return [3, $e->[1]]                   }
         if ($t eq 'var') { return [1, [$e->[1], $e->[2], $conv]] }
-        if ($t eq 'cmp') { return [2, $e] }
+        if ($t eq 'cmp') { return [2, $e]                        }
     }
+
     return [0, $conv];
 }
 
@@ -1816,13 +1855,17 @@ sub _eval_shape {
         my ($ret) = $self->_peval($shape->[1][2]);
         return $ret;
     }
+
     if ($kind == 2) {
         return $self->_micro_compare($shape->[1], $tv->{$shape->[1][1]});
     }
+
     if ($kind == 3) {
         return $shape->[1];
     }
+
     my ($ret) = $self->_peval($shape->[1]);
+
     return $ret;
 }
 
@@ -1898,6 +1941,7 @@ sub _error_out {
     my $self    = shift;
     my $msg     = shift;
     my $err_num = shift;
+
     croak "Template::Sluz error #$err_num: $msg";
 }
 
