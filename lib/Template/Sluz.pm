@@ -21,8 +21,10 @@ use 5.016;
 
 use File::Basename qw(dirname basename);
 use autouse 'Carp' => qw(croak);
+use Exporter qw(import);
 
 use constant SLUZ_INLINE => 'INLINE_TEMPLATE';
+our @EXPORT = qw(SLUZ_INLINE);
 
 our $VERSION = 'v0.9.7';
 
@@ -2051,6 +2053,14 @@ This is useful when template content contains curly braces (e.g., inline
 CSS, JavaScript, or JSON) that would otherwise conflict with the default
 template syntax.  All subsequent calls to C<fetch>, C<parse_string>, etc.
 will use the new delimiters.
+
+=item B<SLUZ_INLINE>
+
+The C<SLUZ_INLINE> constant is exported by default and signals that the
+template content is inline in the C<__DATA__> section. C<fetch> uses
+C<SLUZ_INLINE> automatically when called with no arguments:
+
+    print $s->fetch(SLUZ_INLINE);          # equivalent to $s->fetch()
 
 =back
 
