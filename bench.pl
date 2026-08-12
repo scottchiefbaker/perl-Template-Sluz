@@ -36,7 +36,7 @@ print "$line\n";
 my $total_time = 0;
 my %results;
 
-for my $name (sort keys %templates) {
+foreach my $name (sort keys %templates) {
     my $t    = $templates{$name};
     my $tpl  = $t->{tpl};
     my $desc = $t->{desc};
@@ -44,10 +44,12 @@ for my $name (sort keys %templates) {
     if ($filter && $name !~ /$filter/i && $desc !~ /$filter/i) { next; }
 
     # Warmup
-    $sluz->parse_string($tpl) for 1..10;
+	foreach (1 .. 10) {
+		$sluz->parse_string($tpl);
+	}
 
     my $start = millis();
-    for (1..$ITERATIONS) {
+    foreach (1 .. $ITERATIONS) {
         $sluz->parse_string($tpl);
     }
     my $elapsed = millis() - $start;
