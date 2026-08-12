@@ -14,13 +14,13 @@ require "$FindBin::Bin/test_setup.pl";
 my $s_off = Template::Sluz->new(auto_escape => 0);
 my $s_on  = Template::Sluz->new(auto_escape => 1);
 
-$_->assign('name'        , 'Scott')                     for ($s_off, $s_on);
-$_->assign('xss'         , '<script>alert(1)</script>') for ($s_off, $s_on);
-$_->assign('safe_html'   , '<b>bold</b>')               for ($s_off, $s_on);
-$_->assign('nums'        , [1, 2, 3])                   for ($s_off, $s_on);
-$_->assign('hashref'     , {a => '<tag>'})              for ($s_off, $s_on);
-$_->assign('empty_string', '')                          for ($s_off, $s_on);
-$_->assign('zero'        , 0)                           for ($s_off, $s_on);
+$_->assign('name'        , 'Scott')                     foreach ($s_off, $s_on);
+$_->assign('xss'         , '<script>alert(1)</script>') foreach ($s_off, $s_on);
+$_->assign('safe_html'   , '<b>bold</b>')               foreach ($s_off, $s_on);
+$_->assign('nums'        , [1, 2, 3])                   foreach ($s_off, $s_on);
+$_->assign('hashref'     , {a => '<tag>'})              foreach ($s_off, $s_on);
+$_->assign('empty_string', '')                          foreach ($s_off, $s_on);
+$_->assign('zero'        , 0)                           foreach ($s_off, $s_on);
 
 # ---------------------------------------------------------------------------
 # auto_escape => 0 — everything raw (existing behaviour)
