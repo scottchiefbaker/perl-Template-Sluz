@@ -39,6 +39,7 @@ my ($fh, $path);
 
 # LF file
 ($fh, $path) = tempfile();
+binmode $fh;
 print $fh "#!/usr/bin/perl\nmy \@x = 1;\n$MARKER\nline one\nline two\n";
 close $fh;
 my ($content, $line_offset) = $sluz->_get_inline_content($path);
@@ -47,6 +48,7 @@ is($line_offset, 3, 'LF #2 - line offset counts marker line');
 
 # CRLF file
 ($fh, $path) = tempfile();
+binmode $fh;
 print $fh "#!/usr/bin/perl\nmy \@x = 1;\n$MARKER\r\nline one\r\nline two\r\n";
 close $fh;
 ($content, $line_offset) = $sluz->_get_inline_content($path);
@@ -55,6 +57,7 @@ is($line_offset, 3, 'CRLF #2 - line offset counts marker line');
 
 # Marker at EOF with no trailing newline
 ($fh, $path) = tempfile();
+binmode $fh;
 print $fh "a\n${MARKER}tail only";
 close $fh;
 ($content, $line_offset) = $sluz->_get_inline_content($path);
@@ -63,6 +66,7 @@ is($line_offset, 1, 'EOF #2 - offset counts newlines before data (none after mar
 
 # No marker section
 ($fh, $path) = tempfile();
+binmode $fh;
 print $fh "no data section here\n";
 close $fh;
 is($sluz->_get_inline_content($path), undef, 'NoData #1 - no marker returns undef');

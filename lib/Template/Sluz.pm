@@ -522,7 +522,7 @@ sub _get_inline_content {
 
     # Slurp in the whole file
     local $/;
-    open my $fh, '<', $file or return undef;
+    open my $fh, '<:raw', $file or return undef;
     my $str = <$fh>;
     close $fh;
 
