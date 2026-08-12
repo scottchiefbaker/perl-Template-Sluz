@@ -2246,3 +2246,5 @@ L<https://github.com/scottchiefbaker/sluz>
 GPL-3.0-or-later
 
 =cut
+
+# vim: tabstop=4 softtabstop=4 shiftwidth=4 expandtab:
