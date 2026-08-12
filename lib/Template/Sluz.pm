@@ -86,6 +86,7 @@ sub new {
         _micro_cache        => {}, # Cached _micro_optimize shape classification (skips regex on repeat calls)
         _src_shape_cache    => {}, # Cached foreach source expression shapes (avoids _peval per render)
         _mod_chain_cache    => {}, # Cached parsed modifier chains (crefs + literal params resolved once)
+        _inline_cache       => {}, # Cached _get_inline_content results keyed by perl_file
     };
 
     bless $self, $class;
@@ -498,15 +499,41 @@ sub _get_tpl_content {
 sub _get_inline_content {
     my $self = shift;
     my $file = shift;
+
+	# Check if it's cached
+    if (exists $self->{_inline_cache}{$file}) {
+        return @{ $self->{_inline_cache}{$file} };
+    }
+
+	# Slurp in the whole file
     local $/;
     open my $fh, '<', $file or return undef;
     my $str = <$fh>;
     close $fh;
+
+	# Look for the __DATA__ offset
     my $idx = index($str, '__DATA__');
     if ($idx < 0) { return undef }
-    my $before = substr($str, 0, $idx + 9);
+
+    # Find first \n after the marker (handles both LF and CRLF files)
+    my $nl = index($str, "\n", $idx);
+
+    my $before;
+    my $content;
+    if ($nl < 0) {
+        # No newline after marker: data runs to EOF
+        $before  = $str;
+        $content = '';
+    } else {
+        $before  = substr($str, 0, $nl + 1);
+        $content = substr($str, $nl + 1);
+    }
+
     my $line_offset = $before =~ tr/\n//;
-    return (substr($str, $idx + 9), $line_offset);
+
+    $self->{_inline_cache}{$file} = [$content, $line_offset];
+
+    return @{ $self->{_inline_cache}{$file} };
 }
 
 # -------------------------------------------------------------------
