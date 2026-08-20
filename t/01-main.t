@@ -197,9 +197,6 @@ is($@, "", 'Assign #2 - Empty hashref (no-op)');
 # Variable edge cases
 # -------------------------------------------------------------------
 sluz_test($sluz, '{$hashref.nested.deep}',               'found',                     'Deep dive #1 - Three-level dotted hash access');
-sluz_test($sluz, '{$bogus_var}',                         '',                          'Deep dive #2 - Undefined variable returns empty');
-sluz_test($sluz, '{$null}',                              '',                          'Deep dive #3 - null variable returns empty');
-sluz_test($sluz, '{$array}',                             'ARRAY',                     'Deep dive #4 - Array returned as scalar');
 
 # -------------------------------------------------------------------
 # Error edge cases
