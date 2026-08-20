@@ -81,4 +81,12 @@ is($s_on->parse_string('{$zero + 3}')              , '3'                        
 is($s_on->parse_string('{$xss . "!"}')             , '<script>alert(1)</script>!'           , 'on: concat expression bypasses auto-escape');
 is($s_on->parse_string('{$xss|escape}')            , '&lt;script&gt;alert(1)&lt;/script&gt;', 'on: sanity - variable block still escaped');
 
+# Ported from PHP Auto Escape #5, #10-11 - raw/noescape and default escaping
+is($s_on->parse_string('{$xss|raw}')                         , '<script>alert(1)</script>', 'on: raw alias bypass (PHP compat)');
+is($s_on->parse_string('{$empty_string|default:"<b>x</b>"}') , '&lt;b&gt;x&lt;/b&gt;'     , 'on: default value is escaped');
+is($s_on->parse_string('{$bogus_var|default:"<b>...</b>"}')  , '&lt;b&gt;...&lt;/b&gt;'   , 'on: default escapes even when var empty');
+is($s_on->parse_string('{$bogus_var|default:"<b>"|noescape}'), '<b>'                      , 'on: default with noescape bypass');
+is($s_on->parse_string('{$bogus_var|default:"<b>"|raw}')     , '<b>'                      , 'on: default with raw bypass');
+is($s_on->parse_string('{$bogus_var|default:"a"|uc}')        , 'A'                        , 'on: default chained with uc under auto-escape');
+
 done_testing();

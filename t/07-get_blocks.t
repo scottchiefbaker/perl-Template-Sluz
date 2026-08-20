@@ -93,4 +93,9 @@ my $sluz = setup_sluz();
 	is(scalar @x, 0, 'Get blocks #16 - Deeply nested comment (4 levels)');
 }
 
+{
+	my @x = $sluz->_get_blocks('{* Comment *}');
+	is(scalar @x, 0, 'Get blocks #17 - Only comments (PHP Get blocks #14)');
+}
+
 done_testing();

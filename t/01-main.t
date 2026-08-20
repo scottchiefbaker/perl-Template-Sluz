@@ -73,13 +73,27 @@ sluz_test($sluz, '{$first . " " . $last}'                 , 'Scott Baker' , 'Bas
 sluz_test($sluz, '{$x > 3 ? "yes" : "no"}'                , 'yes'         , 'Basic #47 - Ternary expression');
 sluz_test($sluz, '{$number + $null}'                      , '15'          , 'Basic #48 - Mixed types: number + null');
 sluz_test($sluz, '{$number + $x}'                         , '22'          , 'Basic #49 - Mixed types: number + numeric string');
-sluz_test($sluz, '{$empty_string|default:"N/A"}',            'N/A'           , 'Basic #50 - Default with forward slash (empty)');
-sluz_test($sluz, '{$first|default:"N/A"}',                  'Scott'         , 'Basic #51 - Default with forward slash (non-empty)');
-sluz_test($sluz, '{$empty_string|default:"path/to/file"}',   'path/to/file'  , 'Basic #52 - Default with path containing slashes');
-sluz_test($sluz, '{$empty_string|default:"yes/no"}',         'yes/no'        , 'Basic #53 - Default with slash abbreviation');
-sluz_test($sluz, '{$empty_string|default:"C:\\"}',           'C:\\'          , 'Basic #54 - Default with backslash');
-sluz_test($sluz, '{$animal|uc}'                               , 'KITTEN'   , 'Basic #55 - Modifier on a variable');
-sluz_test($sluz, '{$word|lc|ucfirst}'                          , 'Crazy'    , 'Basic #56 - Chaining modifiers');
+sluz_test($sluz, '{$empty_string|default:"N/A"}'          , 'N/A'         , 'Basic #50 - Default with forward slash (empty)');
+sluz_test($sluz, '{$first|default:"N/A"}'                 , 'Scott'       , 'Basic #51 - Default with forward slash (non-empty)');
+sluz_test($sluz, '{$empty_string|default:"path/to/file"}' , 'path/to/file', 'Basic #52 - Default with path containing slashes');
+sluz_test($sluz, '{$empty_string|default:"yes/no"}'       , 'yes/no'      , 'Basic #53 - Default with slash abbreviation');
+sluz_test($sluz, '{$empty_string|default:"C:\\"}'         , 'C:\\'        , 'Basic #54 - Default with backslash');
+sluz_test($sluz, '{$animal|uc}'                           , 'KITTEN'      , 'Basic #55 - Modifier on a variable');
+sluz_test($sluz, '{$word|lc|ucfirst}'                     , 'Crazy'       , 'Basic #56 - Chaining modifiers');
+
+# Ported from PHP Basic #30-31, #49-55
+sluz_test($sluz, '{$bogus_var|default:"hello"|uc}',            'HELLO'     , 'Basic #57 - Default chained with modifier (empty var)');
+sluz_test($sluz, '{$last|default:"nobody"|uc}',                'BAKER'     , 'Basic #58 - Default chained with modifier (non-empty var)');
+sluz_test($sluz, '{$zero}',                                    '0'         , 'Basic #59 - Direct output of zero (falsy)');
+sluz_test($sluz, '{$true}',                                    '1'         , 'Basic #60 - Direct output of true');
+sluz_test($sluz, '{$false}',                                   '0'         , 'Basic #61 - Direct output of false (Perl 0 not empty)');
+sluz_test($sluz, '{$null}',                                    ''          , 'Basic #62 - Direct output of null (falsy)');
+sluz_test($sluz, '{$bogus_var|default:"a:b"}',                 'a:b'       , 'Basic #63 - Default with colon inside quotes');
+# Deep dotted path (PHP Basic #53-54) - setup deep hash
+$sluz->assign('deep', {a => {b => {c => 'deepval'}}});
+sluz_test($sluz, '{$deep.a.b.c}',                              'deepval'   , 'Basic #64 - Multi-level dot path (3 levels)');
+sluz_test($sluz, '{$deep.a.b.x|default:"dflt"}',               'dflt'      , 'Basic #65 - Multi-level dot path with default');
+sluz_test($sluz, '{$deep.a.b.c|default:"dflt"}',               'deepval'   , 'Basic #66 - Multi-level dot path with default (not used)');
 
 # -------------------------------------------------------------------
 # Custom/User functions
@@ -128,8 +142,8 @@ like($@, qr/73467/, 'Error #4 - syntax error');
 # -------------------------------------------------------------------
 # Plain text tests
 # -------------------------------------------------------------------
-sluz_test($sluz, 'Scott',              'Scott',              'Plain text #1 - Static text');
-sluz_test($sluz, '<div>Scott</div>',   '<div>Scott</div>',   'Plain text #2 - HTML');
+sluz_test($sluz, 'Scott'           , 'Scott'           , 'Plain text #1 - Static text');
+sluz_test($sluz, '<div>Scott</div>', '<div>Scott</div>', 'Plain text #2 - HTML');
 
 # -------------------------------------------------------------------
 # Bad block tests

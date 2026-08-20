@@ -284,8 +284,12 @@ sub escape {
     return $str;
 }
 
-# Bypass auto-escaping when auto_escape is on: {$var|noescape}
+# Bypass auto-escaping when auto_escape is on: {$var|noescape} or {$var|raw}
 sub noescape {
+    return shift;
+}
+
+sub raw {
     return shift;
 }
 
@@ -629,8 +633,10 @@ sub _get_blocks {
             elsif (index($block, $tag_foreach) == 0)   { $matched_block = 'foreach' }
             elsif (index($block, $tag_literal) == 0)   { $matched_block = 'literal' }
 
+            my $found_close = 0;
             if ($matched_block) {
                 my $close_tag = "${od}/${matched_block}${cd}";
+                $found_close = 0;
                 foreach my $j (($i + 1) .. (length($str) - 1)) {
                     if (substr($str, $j, 1) eq $cd) {
                         my $tmp = substr($str, $start, $j - $start + 1);
@@ -638,9 +644,13 @@ sub _get_blocks {
                         my $cc  = () = $tmp =~ /\Q${close_tag}\E/g;
                         if ($oc == $cc) {
                             $block = $tmp;
+                            $found_close = 1;
                             last;
                         }
                     }
+                }
+                if (!$found_close) {
+                    $block = substr($str, $start);
                 }
             }
 
@@ -675,7 +685,7 @@ sub _get_blocks {
             # This mirrors the comment-line handling below.
             my $orig_block_len = length($block);
 
-            if ($matched_block && $matched_block eq 'literal') {
+            if ($matched_block && $matched_block eq 'literal' && $found_close) {
                 my $ltag  = $self->{_tag_literal};
                 my $rtag  = $self->{_tag_literal_close};
                 my $l_len = $self->{_tag_literal_len};
@@ -997,12 +1007,31 @@ sub _variable_block {
         my $is_nothing = (!defined $tmp || (ref $tmp eq '' && !length $tmp && $tmp ne '0'));
 
         if ($chain->{is_default}) {
+            my $pre;
             if ($is_nothing) {
-                my $ret = $self->_eval_shape($chain->{default_shape});
-                if (defined $ret) { return $ret }
-                return '';
+                $pre = $self->_eval_shape($chain->{default_shape});
+                $pre = '' unless defined $pre;
+            } else {
+                $pre = $tmp // '';
             }
-            return $tmp // '';
+
+            # Apply any modifiers that follow default: (e.g. |default:"x"|uc)
+            foreach my $step (@{$chain->{steps} // []}) {
+                my @params = ($pre);
+                foreach my $sh (@{$step->[1]}) {
+                    if ($sh->[0] == 3) { push @params, $sh->[1] }
+                    else               { push @params, $self->_eval_shape($sh) }
+                }
+                $pre = eval { $step->[0]->(@params) };
+                if ($@) {
+                    $self->_error_out("Exception: $@", 79134);
+                }
+            }
+
+            if ($self->{auto_escape} && !$chain->{seen_noescape} && !$chain->{seen_escape}) {
+                return escape($pre);
+            }
+            return $pre;
         }
 
         if ($is_nothing) { return '' }
@@ -1049,10 +1078,73 @@ sub _build_mod_chain {
     };
 
     if (index($mod, 'default:') >= 0) {
+        # Support default with optional trailing modifiers: |default:"x"|uc
+        # Split pipe-aware (not inside quotes) and locate the default: part.
+        my $pipe_re = $self->{_pipe_re};
+        my @parts = split $pipe_re, $mod;
+        my $def_idx = -1;
+        my $def_arg;
+        for my $i (0 .. $#parts) {
+            if ($parts[$i] =~ /^default:(.*)/s) {
+                $def_idx = $i;
+                $def_arg = $1;
+                last;
+            }
+        }
+        if ($def_idx >= 0) {
+            $chain->{is_default}    = 1;
+            $chain->{default_shape} = $self->_shape_of($def_arg);
+
+            # Build steps for any modifiers that follow default:
+            my @post = @parts[$def_idx + 1 .. $#parts];
+            # Also include modifiers before default? PHP ignores them; we preserve
+            # them as pre-steps only if they existed before default, but for
+            # parity we treat default as first and post-steps as chain after fallback.
+            # If there were pre-default modifiers, they are ignored (matching PHP).
+            my @steps;
+            my $seen_escape   = 0;
+            my $seen_noescape = 0;
+            foreach my $m_part (@post) {
+                next if !length $m_part;
+                my @x    = split /:/, $m_part, 2;
+                my $func = $x[0] // '';
+                if ($func eq 'escape')              { $seen_escape   = 1 }
+                if ($func eq 'noescape' || $func eq 'raw') { $seen_noescape = 1 }
+                my $param_str = $x[1] // '';
+                my @shapes;
+                if (length $param_str) {
+                    foreach my $p (split $self->{_comma_re}, $param_str) {
+                        push @shapes, $self->_shape_of($p);
+                    }
+                }
+                my $cref = $self->{_mod_cache}{$func};
+                if (!defined $cref) {
+                    no strict 'refs';
+                    if    (defined &{"main::$func"}) { $cref = \&{"main::$func"} }
+                    elsif (defined &{$func})         { $cref = \&{$func}         }
+                    elsif (defined &{"CORE::$func"}) { $cref = \&{"CORE::$func"} }
+                    else                             { $cref = 0                 }
+                    $self->{_mod_cache}{$func} = $cref;
+                }
+                if (!$cref) {
+                    my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+                    $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
+                }
+                push @steps, [$cref, \@shapes];
+            }
+            $chain->{steps}         = \@steps;
+            $chain->{seen_escape}   = $seen_escape;
+            $chain->{seen_noescape} = $seen_noescape;
+            return $chain;
+        }
+        # Fallback: treat whole suffix as default value (legacy)
         my $dval = $mod;
         $dval =~ s/^.*?default://;
         $chain->{is_default}    = 1;
         $chain->{default_shape} = $self->_shape_of($dval);
+        $chain->{steps}         = [];
+        $chain->{seen_escape}   = 0;
+        $chain->{seen_noescape} = 0;
         return $chain;
     }
 
@@ -1068,8 +1160,8 @@ sub _build_mod_chain {
         my @x    = split /:/, $m_part, 2;
         my $func = $x[0] // '';
 
-        if ($func eq 'escape')   { $seen_escape   = 1 }
-        if ($func eq 'noescape') { $seen_noescape = 1 }
+        if ($func eq 'escape')              { $seen_escape   = 1 }
+        if ($func eq 'noescape' || $func eq 'raw') { $seen_noescape = 1 }
 
         my $param_str = $x[1] // '';
         my @shapes;
@@ -1160,14 +1252,24 @@ sub _if_block {
             if (exists $tv->{$key}) {
                 $res = $neg ? !$tv->{$key} : $tv->{$key};
             } else {
-                ($res) = $self->_peval($shape->[1][2]);
+                my ($tmp, $err) = $self->_peval($shape->[1][2]);
+                if ($err) {
+                    my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+                    $self->_error_out("Unable to evaluate condition <code>$rule->[0]</code> in <code>$file</code> on line #$line", 18933);
+                }
+                $res = $tmp;
             }
         } elsif ($kind == 2) {
             $res = $self->_micro_compare($shape->[1], $tv->{$shape->[1][1]});
         } elsif ($kind == 3) {
             $res = $shape->[1];
         } else {
-            ($res) = $self->_peval($shape->[1]);
+            my ($tmp, $err) = $self->_peval($shape->[1]);
+            if ($err) {
+                my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+                $self->_error_out("Unable to evaluate condition <code>$rule->[0]</code> in <code>$file</code> on line #$line", 18933);
+            }
+            $res = $tmp;
         }
 
         if ($res) {
@@ -1584,7 +1686,8 @@ sub _include_block {
     my $self = shift;
     my $str  = shift;
 
-    my $save    = $self->{tpl_vars};
+    my $save    = { %{$self->{tpl_vars}} };
+    my $save_S  = { %{$self->{__S}} };
     my $inc_tpl = $self->_extract_include_file($str);
 
     if ($self->{perl_file_dir}) {
@@ -1623,6 +1726,7 @@ sub _include_block {
     my $r      = $self->_process_blocks(\@blocks);
 
     $self->{tpl_vars}      = $save;
+    $self->{__S}           = $save_S;
     $self->{inc_tpl_file}  = undef;
 
     return $r;

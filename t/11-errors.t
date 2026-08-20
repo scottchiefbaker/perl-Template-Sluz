@@ -111,6 +111,40 @@ require "$FindBin::Bin/test_setup.pl";
 
     $out = $s->parse_string('foo() { bar }');
     is($out, 'foo() { bar }', 'Function-body-like text is left untouched');
+
+    eval { $s->parse_string('{ 3 + 4 }') };
+    like($@, qr/#50981/, 'Err #50981 - whitespace around expression');
+}
+
+# Ported from PHP Error #5-12, Comment #7, Basic #46-48 (runtime + unclosed)
+# Note: PHP treats bareword `Scott` and `1/0` as fatal; Perl treats them
+# as strings/Inf respectively, so those expectations are adapted.
+{
+    my $s = setup_sluz();
+
+    eval { $s->parse_string('{undefined_func()}') };
+    like($@, qr/#18933/, 'Err #18933 - call to undefined function');
+
+    eval { $s->parse_string('{1/0}') };
+    like($@, qr/#18933/, 'Err #18933 - division by zero (int)');
+
+    eval { $s->parse_string('{if $first == Scott}YES{/if}') };
+    like($@, qr/#18933/, 'Err #18933 - undefined constant in condition');
+
+    eval { $s->parse_string('{if $bogus_var}A{elseif $first == Scott}B{/if}') };
+    like($@, qr/#18933/, 'Err #18933 - undefined constant in elseif');
+
+    eval { $s->parse_string('{if $x}foo') };
+    like($@, qr/#45821/, 'Err #45821 - unclosed if');
+
+    eval { $s->parse_string('{if $x}foo{else}bar') };
+    like($@, qr/#45821/, 'Err #45821 - unclosed if with else');
+
+    eval { $s->parse_string('{foreach $array as $item}foo') };
+    like($@, qr/#45821/, 'Err #45821 - unclosed foreach');
+
+    eval { $s->parse_string('{literal}foo') };
+    like($@, qr/#45821/, 'Err #45821 - unclosed literal');
 }
 
 done_testing();
