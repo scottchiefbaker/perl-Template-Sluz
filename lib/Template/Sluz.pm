@@ -635,10 +635,22 @@ sub _get_blocks {
 
             my $found_close = 0;
             if ($matched_block) {
-                my $close_tag = "${od}/${matched_block}${cd}";
+                my $close_tag     = "${od}/${matched_block}${cd}";
+                my $close_tag_len = length $close_tag;
+                my $first_literal_close;
                 $found_close = 0;
                 foreach my $j (($i + 1) .. (length($str) - 1)) {
                     if (substr($str, $j, 1) eq $cd) {
+                        # Preserve the first literal close as a fallback when its
+                        # payload contains raw {literal} text without a matching
+                        # nested close.
+                        if ($matched_block eq 'literal' && !defined $first_literal_close) {
+                            my $tag_end = substr($str, $j - $close_tag_len + 1, $close_tag_len);
+                            if ($tag_end eq $close_tag) {
+                                $first_literal_close = $j;
+                            }
+                        }
+
                         my $tmp = substr($str, $start, $j - $start + 1);
                         my $oc  = () = $tmp =~ /\Q${od}${matched_block}\E/g;
                         my $cc  = () = $tmp =~ /\Q${close_tag}\E/g;
@@ -650,7 +662,15 @@ sub _get_blocks {
                     }
                 }
                 if (!$found_close) {
-                    $block = substr($str, $start);
+                    # A literal payload may itself begin with {literal} without a
+                    # matching nested close. In that case its first close ends the
+                    # outer literal; a missing close remains an unclosed-tag error.
+                    if (defined $first_literal_close) {
+                        $block = substr($str, $start, $first_literal_close - $start + 1);
+                        $found_close = 1;
+                    } else {
+                        $block = substr($str, $start);
+                    }
                 }
             }
 
