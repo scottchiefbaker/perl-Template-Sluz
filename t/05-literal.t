@@ -26,4 +26,21 @@ sluz_test($sluz, "{literal}\nfoo\n{/literal}y"           , "foo\ny"             
 sluz_test($sluz, ' { '                                   , ' { '                , 'Literal #12 - { with whitespace');
 sluz_test($sluz, '{}'                                    , '{}'                 , 'Literal #13 - Raw {}');
 
+# -------------------------------------------------------------------
+# Upstream PHP unit-test parity additions - meta-literal variants
+# -------------------------------------------------------------------
+sluz_test($sluz, '{literal}{literal}x{/literal}{/literal}', '{literal}x{/literal}',
+    'Literal #14 - Meta literal with content');
+
+# Upstream PHP renders '{literal}x' for this input; the Perl port reports the
+# unclosed block as #45821 instead. Documented divergence.
+eval { $sluz->parse_string('{literal}{literal}{/literal}x') };
+like($@, qr/45821/, 'Literal #15 - Meta literal with trailing text (upstream: {literal}x)');
+
+sluz_test($sluz, 'x{literal}{literal}{/literal}', 'x{literal}',
+    'Literal #16 - Leading text before meta literal');
+
+eval { $sluz->parse_string('x{literal}{literal}{/literal}x') };
+like($@, qr/45821/, 'Literal #17 - Meta literal wrapped in text (upstream: x{literal}x)');
+
 done_testing();

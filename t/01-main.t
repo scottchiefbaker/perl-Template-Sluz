@@ -185,6 +185,38 @@ $sluz->parent_tpl(undef);
 $sluz->{parent_tpl} = undef;
 
 # -------------------------------------------------------------------
+# Upstream PHP unit-test parity additions
+# -------------------------------------------------------------------
+
+sluz_test($sluz, '{$hashref.nested.nope|default:"dflt"}', 'dflt',
+    'Basic - Multi-level dotted path with default');
+
+sluz_test($sluz, '{$number > 3 ? "yes" : "no"}', 'yes',
+    'Basic - Ternary expression');
+
+sluz_test($sluz, '{$number + $null}', '15', 'Basic - Mixed types: number + null');
+# Upstream PHP unit tests expect 15 too (PHP null casts to 0 in arithmetic);
+# Perl undef also numerifies to 0, so both engines agree here.
+
+eval { $sluz->parse_string('{$number }') };
+like($@, qr/50981/, 'Basic - Trailing whitespace inside braces is invalid');
+
+eval { $sluz->parse_string('{ $number }') };
+like($@, qr/50981/, 'Basic - Leading whitespace inside braces is invalid');
+
+eval { $sluz->parse_string('{ 3 + 4 }') };
+like($@, qr/50981/, 'Basic - Whitespace around expression is invalid');
+
+# Assign a variable and render it back (upstream Basic #56/#57 pattern)
+$sluz->assign('upstream_roundtrip', 'RTVAL');
+sluz_test($sluz, '{$upstream_roundtrip}', 'RTVAL', 'Basic - Assigned and asserted roundtrip');
+
+# Assign-overwrite then restore
+$sluz->assign('upstream_overwrite', 'FIRST');
+$sluz->assign('upstream_overwrite', 'SECOND');
+sluz_test($sluz, '{$upstream_overwrite}', 'SECOND', 'Assign #3 - Overwrite previous value');
+
+# -------------------------------------------------------------------
 # Assign edge cases
 # -------------------------------------------------------------------
 eval { $sluz->assign('odd_args_test'); };
