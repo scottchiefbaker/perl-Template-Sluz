@@ -530,9 +530,10 @@ sub _get_inline_content {
     my $str = <$fh>;
     close $fh;
 
-    # Look for the __DATA__ offset
-    my $idx = index($str, '__DATA__');
-    if ($idx < 0) { return undef }
+    # Look for a __DATA__ marker at the start of a line. A mention inside a
+    # comment or string (e.g. "# __DATA__ is below") must not match.
+    if ($str !~ /^__DATA__/m) { return undef }
+    my $idx = $-[0];
 
     # Find first \n after the marker (handles both LF and CRLF files)
     my $nl = index($str, "\n", $idx);

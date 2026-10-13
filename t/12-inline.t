@@ -6,11 +6,25 @@ require "$FindBin::Bin/test_setup.pl";
 
 use File::Temp qw(tempfile);
 
-# Build the marker dynamically so the source above the real data section
-# contains no literal marker string (index() finds the FIRST occurrence).
-my $MARKER = '__DA' . 'TA__';
+my $MARKER = '__DATA__';
 
 my $sluz = setup_sluz();
+
+# Build a throwaway "script" file whose data section holds $body. $prefix is
+# source placed above the marker (may mention the marker in comments/strings).
+# Returns a Template::Sluz instance pointed at that file.
+sub inline_instance {
+    my ($prefix, $body) = @_;
+    my ($fh, $path) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    binmode $fh;
+    print $fh "${prefix}$MARKER\n$body";
+    close $fh;
+
+    my $s = Template::Sluz->new();
+    $s->assign(name => 'N', y => [1, 2], debug => 1);
+    $s->{perl_file} = $path;
+    return $s;
+}
 
 # -------------------------------------------------------------------
 # Inline data-section content via fetch()
@@ -82,6 +96,45 @@ my ($c2, $o2) = $sluz->_get_inline_content($f);
 is($c1, $c2, 'Cache #2 - repeated calls return same content');
 is($o1, $o2, 'Cache #3 - repeated calls return same offset');
 is($sluz->fetch(), $out, 'Cache #4 - repeated fetch() renders identical output');
+
+# -------------------------------------------------------------------
+# Marker detection: only a line consisting of the marker counts. A mention
+# inside a comment or string above the real marker must be ignored.
+# -------------------------------------------------------------------
+{
+    my $s = inline_instance("# $MARKER is mentioned here\nmy \$x = '$MARKER';\n", "real {\$name}\n");
+    is($s->fetch(), "real N\n", 'Inline #9 - Marker text in a comment or string is ignored');
+}
+
+# -------------------------------------------------------------------
+# Section content: custom delimiters, blocks, and errors
+# -------------------------------------------------------------------
+{
+    my $s = inline_instance('', 'ALT [$name] {$name}');
+    $s->set_delimiters('[', ']');
+    is($s->fetch(), 'ALT N {$name}', 'Inline #15 - Custom delimiters apply to the inline section');
+}
+
+{
+    my $s = inline_instance('', '{foreach $y as $v}[{$v}]{/foreach}{if $debug}ON{/if}');
+    is($s->fetch(), '[1][2]ON', 'Inline #16 - foreach and if blocks render in the inline section');
+}
+
+{
+    my $s = inline_instance('', '{$name|nonexistent_xyz}');
+    eval { $s->fetch() };
+    like($@, qr/#47204/, 'Inline #17 - Modifier error inside the inline section is reported');
+}
+
+# -------------------------------------------------------------------
+# Error line numbers in the inline section report the line in the source file.
+# Marker is on file line 2, so section line 4 ("{foo") is file line 6.
+# -------------------------------------------------------------------
+{
+    my $s = inline_instance("use strict;\n", "\nline one\nline two\n{foo\n");
+    eval { $s->fetch() };
+    like($@, qr/on line #6\b/, 'Inline #18 - Inline error reports its line in the source file');
+}
 
 done_testing();
 
