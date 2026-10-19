@@ -59,6 +59,16 @@ require "$FindBin::Bin/test_setup.pl";
     like($@, qr/#47204/, 'Err #47204 - unknown modifier function');
 }
 
+# #31558 - unquoted non-numeric modifier parameter
+{
+    my $s = setup_sluz();
+    eval { $s->parse_string('{$first|join_comma:abc}') };
+    like($@, qr/#31558/, 'Err #31558 - bare word modifier param');
+
+    eval { $s->parse_string('{$first|join_comma:;}') };
+    like($@, qr/#31558/, 'Err #31558 - punctuation modifier param');
+}
+
 # #79134 - exception thrown inside a modifier
 {
     my $s = setup_sluz();
