@@ -94,6 +94,7 @@ sub new {
         _convert_cache      => {}, # Cached _convert_vars results (avoids re-running regex on repeated expressions)
         _blocks_cache       => {}, # Cached _get_blocks results (avoids re-tokenizing if payloads in loops)
         _if_rules_cache     => {}, # Cached parsed {if} rules (avoids re-parsing same if block in loops)
+        _if_payload_cache   => {}, # Cached {if} branch payloads (condition + payload, no shape)
         _verified_sub_cache => {}, # Cached subs that succeeded once — skip eval/SIG overhead
         _mod_cache          => {}, # Cached resolved modifier coderefs keyed by func name
         _micro_cache        => {}, # Cached _micro_optimize shape classification (skips regex on repeat calls)
@@ -218,6 +219,7 @@ sub set_delimiters {
     # Clear all caches since results are delimiter-dependent
     $self->{_blocks_cache}       = {};
     $self->{_if_rules_cache}     = {};
+    $self->{_if_payload_cache}   = {};
     $self->{_convert_cache}      = {};
     $self->{_sub_cache}          = {};
     $self->{_verified_sub_cache} = {};
@@ -785,19 +787,26 @@ sub _get_blocks {
 
     # Strip leading newline from text blocks that follow {if} or
     # {foreach} blocks, to avoid double-newlines when the block
-    # payload already ends with \n. For {foreach}, only strip when
-    # the payload actually ends with \n — if the payload is inline
-    # (no trailing \n), the newline is structural content, not
-    # whitespace noise.
+    # payload already ends with \n. The strip only happens when the
+    # block is written in "block style" — i.e. its content ends with a
+    # newline of its own. When the block is written inline (the
+    # content sits on the same line as the closing tag) the newline
+    # that follows the block is real content and must be kept.
     my $prev_is_if = 0;
     my $tag_foreach_close = $self->{_tag_foreach_close};
     foreach my $i (0 .. $#blocks) {
         my $bstr     = $blocks[$i][0] // '';
         my $cur_is_if = (index($bstr, $tag_if) == 0 || index($bstr, $tag_foreach) == 0);
         if ($prev_is_if) {
+            my $prev  = $blocks[$i-1][0] // '';
             my $should_strip = 1;
-            if ($blocks[$i-1][0] =~ /^\Q$tag_foreach\E.+?\}(.*)\Q$tag_foreach_close\E$/s) {
-                $should_strip = (substr($1, -1) eq "\n") ? 1 : 0;
+            if (index($prev, $tag_foreach) == 0) {
+                $should_strip = 0;
+                if ($prev =~ /^\Q$tag_foreach\E.+?\}(.*)\Q$tag_foreach_close\E$/s) {
+                    $should_strip = (substr($1, -1) eq "\n") ? 1 : 0;
+                }
+            } elsif (index($prev, $tag_if) == 0) {
+                $should_strip = $self->_if_block_is_block_style($prev);
             }
             if ($should_strip) {
                 $blocks[$i][0] = $self->ltrim_one($bstr, "\n");
@@ -1359,15 +1368,18 @@ sub _if_block {
     return $ret;
 }
 
-# Parse an {if}/{elseif}/{else} block into a list of rules.  Each rule
-# is [condition, payload, shape] and the shape carries a pre-classified
-# form of the condition so that renders never have to re-parse it.
-sub _build_if_rules {
+# Parse an {if}/{elseif}/{else} block into its branches.  Each branch is
+# a [condition, payload] pair; the payload has a single leading newline
+# stripped, matching the way the branch is rendered.  The result is
+# cached per block string.
+sub _if_payloads {
     my $self = shift;
     my $str  = shift;
 
+    my $cached = $self->{_if_payload_cache}{$str};
+    return $cached if $cached;
+
     my $od = $self->{open_delim};
-    my $cd = $self->{close_delim};
 
     my $isimple_start = length($od) + 1;
     my $else_check    = $od . 'else';
@@ -1386,13 +1398,57 @@ sub _build_if_rules {
         @rules   = $self->_if_rules_from_tokens(\@toks);
     }
 
-    # Pre-resolve each condition's shape once so renders skip
-    # _convert_vars/_micro_optimize/_peval for simple conditions.
-    foreach my $rule (@rules) {
-        push @$rule, $self->_shape_of($rule->[0]);
+    $self->{_if_payload_cache}{$str} = \@rules;
+    return \@rules;
+}
+
+# True when an {if} block is written in "block style", i.e. every one of
+# its branches ends with a newline of its own.  In that case the newline
+# that follows the closing {/if} tag is structural and is swallowed, so
+# the block does not leave a blank line behind.  A block written inline
+# (its content sitting on the same line as the closing tag) keeps the
+# newline, since there the newline is the content's own line ending.
+sub _if_block_is_block_style {
+    my $self = shift;
+    my $str  = shift // '';
+
+    my $rules = eval { $self->_if_payloads($str) };
+    # An unparsable block is reported when it is rendered; keep the
+    # historical behaviour here and let the error surface later.
+    return 1 if !$rules;
+
+    foreach my $rule (@$rules) {
+        my $payload = $rule->[1] // '';
+        next if !length($payload);
+        return 0 if substr($payload, -1) ne "\n";
     }
 
-    return \@rules;
+    return 1;
+}
+
+# Parse an {if}/{elseif}/{else} block into a list of rules.  Each rule
+# is [condition, payload, shape] and the shape carries a pre-classified
+# form of the condition so that renders never have to re-parse it.
+sub _build_if_rules {
+    my $self = shift;
+    my $str  = shift;
+
+    my $rules = $self->{_if_rules_cache}{$str};
+    if (!$rules) {
+        my $parsed = $self->_if_payloads($str);
+
+        my @rules;
+        # Pre-resolve each condition's shape once so renders skip
+        # _convert_vars/_micro_optimize/_peval for simple conditions.
+        foreach my $rule (@$parsed) {
+            push @rules, [$rule->[0], $rule->[1], $self->_shape_of($rule->[0])];
+        }
+
+        $rules = \@rules;
+        $self->{_if_rules_cache}{$str} = $rules;
+    }
+
+    return $rules;
 }
 
 sub _foreach_block {
