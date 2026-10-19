@@ -527,12 +527,12 @@ sub _get_tpl_content {
     }
 
     if ($tf && !-r $tf) {
-        $self->_error_out("Unable to load template file <code>$tf</code>", 42280);
+        $self->_error_out("Unable to load template file `$tf`", 42280);
     }
 
     if ($tf) {
         local $/;
-        open my $fh, '<', $tf or $self->_error_out("Cannot open <code>$tf</code>: $!", 13983);
+        open my $fh, '<', $tf or $self->_error_out("Cannot open `$tf`: $!", 13983);
         my $str = <$fh>;
         close $fh;
         return $str // '';
@@ -719,7 +719,7 @@ sub _get_blocks {
                     if ($lead_ws || $tail_ws) {
                         my ($line, $col, $file) = $self->_get_char_location($start, $self->{tpl_file});
                         $self->_error_out(
-                            "Whitespace next to delimiter in tag <code>$block</code> in <code>$file</code> on line #$line",
+                            "Whitespace next to delimiter in tag `$block` in `$file` on line #$line",
                             50981
                         );
                     }
@@ -766,7 +766,7 @@ sub _get_blocks {
             my $end = $self->find_ending_tag(substr($str, $start), $self->{_tag_comment_open}, $self->{_tag_comment_close});
             if (!defined $end) {
                 my ($line, $col, $file) = $self->_get_char_location($i, $self->{tpl_file});
-                $self->_error_out("Missing closing <code>$self->{_tag_comment_close}</code> for comment in <code>$file</code> on line #$line", 48724);
+                $self->_error_out("Missing closing `$self->{_tag_comment_close}` for comment in `$file` on line #$line", 48724);
             }
             my $after = $start + $end + length($self->{_tag_comment_close});
 
@@ -1016,7 +1016,7 @@ sub _process_block {
     if (ord(substr($str, -1)) != $cd_ord) {
         my $tag_start = $self->{char_pos} - length($str);
         my ($line, $col, $file) = $self->_get_char_location($tag_start, $self->{tpl_file});
-        $self->_error_out("Unclosed tag <code>$str</code> in <code>$file</code> on line #$line", 45821);
+        $self->_error_out("Unclosed tag `$str` in `$file` on line #$line", 45821);
     }
 
     # 8. Fallthrough
@@ -1184,7 +1184,7 @@ sub _build_mod_chain {
                 }
                 if (!$cref) {
                     my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-                    $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
+                    $self->_error_out("Unknown function call `$func` in `$file` on line #$line", 47204);
                 }
                 push @steps, [$cref, \@shapes];
             }
@@ -1248,7 +1248,7 @@ sub _build_mod_chain {
 
         if (!$cref) {
             my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-            $self->_error_out("Unknown function call <code>$func</code> in <code>$file</code> on line #$line", 47204);
+            $self->_error_out("Unknown function call `$func` in `$file` on line #$line", 47204);
         }
 
         push @steps, [$cref, \@shapes];
@@ -1306,7 +1306,7 @@ sub _if_block {
                 my ($tmp, $err) = $self->_peval($shape->[3]);
                 if ($err) {
                     my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-                    $self->_error_out("Unable to evaluate condition <code>$rule->[0]</code> in <code>$file</code> on line #$line", 18933);
+                    $self->_error_out("Unable to evaluate condition `$rule->[0]` in `$file` on line #$line", 18933);
                 }
                 $res = $tmp;
             }
@@ -1334,7 +1334,7 @@ sub _if_block {
                 my ($tmp, $err) = $self->_peval($shape->[6]);
                 if ($err) {
                     my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-                    $self->_error_out("Unable to evaluate condition <code>$rule->[0]</code> in <code>$file</code> on line #$line", 18933);
+                    $self->_error_out("Unable to evaluate condition `$rule->[0]` in `$file` on line #$line", 18933);
                 }
                 $res = $tmp;
             }
@@ -1342,7 +1342,7 @@ sub _if_block {
             my ($tmp, $err) = $self->_peval($shape->[1]);
             if ($err) {
                 my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-                $self->_error_out("Unable to evaluate condition <code>$rule->[0]</code> in <code>$file</code> on line #$line", 18933);
+                $self->_error_out("Unable to evaluate condition `$rule->[0]` in `$file` on line #$line", 18933);
             }
             $res = $tmp;
         }
@@ -2130,12 +2130,12 @@ sub _include_block {
     if (!-f $inc_tpl || !-r $inc_tpl) {
         $self->{inc_tpl_file} = undef;
         my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-        $self->_error_out("Unable to load include template <code>$inc_tpl</code> in <code>$file</code> on line #$line", 18485);
+        $self->_error_out("Unable to load include template `$inc_tpl` in `$file` on line #$line", 18485);
     }
 
     # Slurp up the TPL content
     local $/;
-    open my $fh, '<', $inc_tpl or $self->_error_out("Cannot open <code>$inc_tpl</code>: $!", 63579);
+    open my $fh, '<', $inc_tpl or $self->_error_out("Cannot open `$inc_tpl`: $!", 63579);
     my $content = <$fh>;
     close $fh;
 
@@ -2156,7 +2156,7 @@ sub _expression_block {
 
     if ($str !~ /["\d\$\(]/) {
         my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-        $self->_error_out("Unknown block type <code>$str</code> in <code>$file</code> on line #$line", 73467);
+        $self->_error_out("Unknown block type `$str` in `$file` on line #$line", 73467);
     }
 
     my $after = $self->_convert_vars($inner);
@@ -2171,7 +2171,7 @@ sub _expression_block {
 
     if ($err || !$valid) {
         my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-        $self->_error_out("Unknown tag <code>$str</code> in <code>$file</code> on line #$line", 18933);
+        $self->_error_out("Unknown tag `$str` in `$file` on line #$line", 18933);
     }
 
     return $ret;
@@ -2348,7 +2348,7 @@ sub _check_mod_params {
         next if index($p, '$') >= 0;
 
         my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-        $self->_error_out("Unquoted function parameter <code>$p</code> in <code>$func</code> in <code>$file</code> on line #$line", 31558);
+        $self->_error_out("Unquoted function parameter `$p` in `$func` in `$file` on line #$line", 31558);
     }
     return;
 }
@@ -2588,7 +2588,7 @@ sub _extract_include_file {
     }
 
     my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
-    $self->_error_out("Unable to find a file in include block <code>$str</code> in <code>$file</code> on line #$line", 68493);
+    $self->_error_out("Unable to find a file in include block `$str` in `$file` on line #$line", 68493);
 }
 
 sub _if_rules_from_tokens {
