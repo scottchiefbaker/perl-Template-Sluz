@@ -1168,6 +1168,7 @@ sub _build_mod_chain {
                 my $param_str = $x[1] // '';
                 my @shapes;
                 if (length $param_str) {
+                    $self->_check_mod_params($func, $param_str);
                     foreach my $p (split $self->{_comma_re}, $param_str) {
                         push @shapes, $self->_shape_of($p);
                     }
@@ -1222,6 +1223,7 @@ sub _build_mod_chain {
         my @shapes;
 
         if (length $param_str) {
+            $self->_check_mod_params($func, $param_str);
             # Split on commas not inside double or single quotes
             # (parameter separator in modifier calls like substr:2,2)
             foreach my $p (split $self->{_comma_re}, $param_str) {
@@ -2329,6 +2331,26 @@ sub _micro_compare {
     if ($op eq 'eq') { return $left eq $right }
 
     return $left ne $right;
+}
+
+# Modifier params must be quoted, numeric, or variable references.
+# A bare word such as |join_comma:abc is rejected (#31558) instead of
+# silently becoming undef.
+sub _check_mod_params {
+    my ($self, $func, $param_str) = @_;
+
+    foreach my $p (split $self->{_comma_re}, $param_str) {
+        $p =~ s/^\s+|\s+$//g;
+        next if !length $p;
+        next if $p =~ /^"[^"]*"$/s;
+        next if $p =~ /^'[^']*'$/s;
+        next if $p =~ /^-?\d+(?:\.\d+)?$/;
+        next if index($p, '$') >= 0;
+
+        my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+        $self->_error_out("Unquoted function parameter <code>$p</code> in <code>$func</code> in <code>$file</code> on line #$line", 31558);
+    }
+    return;
 }
 
 # Classify a raw expression into a cached shape tuple so hot paths can
