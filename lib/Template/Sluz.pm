@@ -28,6 +28,19 @@ our @EXPORT = qw(SLUZ_INLINE);
 
 our $VERSION = 'v0.9.7';
 
+# Template used to emit a single variable value into a compiled foreach
+# body.  It mirrors the interpreter's output rules exactly:
+#   ARRAY ref -> "ARRAY", HASH ref -> "HASH", undef -> "", anything else
+#   -> the value itself (HTML-escaped when auto_escape is on).
+my $VAL_TMPL = q[{ my $v = %s; $ret .= (!ref($v) ? ($ae ? Template::Sluz::escape($v // '') : ($v // '')) : (ref($v) eq 'ARRAY' ? 'ARRAY' : (ref($v) eq 'HASH' ? 'HASH' : $v))); }];
+
+# Comparison operators are dispatched by integer code in the hot paths
+# so that no string comparison is needed at render time.
+my %OP_CODE = (
+    'eq' => 0, 'ne' => 1,
+    '==' => 2, '!=' => 3, '>' => 4, '<' => 5, '>=' => 6, '<=' => 7,
+);
+
 ################################################################################
 # Built-in Sluz functions that can be used in templates
 ################################################################################
@@ -87,6 +100,7 @@ sub new {
         _src_shape_cache    => {}, # Cached foreach source expression shapes (avoids _peval per render)
         _mod_chain_cache    => {}, # Cached parsed modifier chains (crefs + literal params resolved once)
         _inline_cache       => {}, # Cached _get_inline_content results keyed by perl_file
+        _foreach_plans      => {}, # Cached foreach plans (blocks + compiled renderer) keyed by loop vars + payload
     };
 
     bless $self, $class;
@@ -210,6 +224,7 @@ sub set_delimiters {
     $self->{_mod_cache}          = {};
     $self->{_src_shape_cache}    = {};
     $self->{_mod_chain_cache}    = {};
+    $self->{_foreach_plans}      = {};
 
     return;
 }
@@ -227,26 +242,27 @@ sub array_dive {
         return $haystack->{$needle};
     }
 
+    # Split parts are cached per needle, so the dotted path is only
+    # scanned once per distinct name.
+    my $parts = $self->{_dive_parts_cache}{$needle}
+             // ($self->{_dive_parts_cache}{$needle} = [split /\./, $needle]);
+
     # Fast path: exactly one dot and a hash -> hash walk (the common
     # case, e.g. "config.theme"). Missing keys yield undef exactly like
     # the generic walk below.
-    my $dot1 = index($needle, '.');
-    if ($dot1 > 0 && $dot1 < length($needle) - 1
-        && index($needle, '.', $dot1 + 1) < 0
+    if (@$parts == 2 && length $parts->[0] && length $parts->[1]
         && ref $haystack eq 'HASH') {
-        my $mid = $haystack->{substr($needle, 0, $dot1)};
+        my $mid = $haystack->{$parts->[0]};
         if (ref $mid eq 'HASH') {
-            return $mid->{substr($needle, $dot1 + 1)};
+            return $mid->{$parts->[1]};
         }
         if (!defined $mid) { return undef }
         # ARRAY or scalar first level: fall through to the generic walk
     }
 
     # Walk dotted path (e.g. "user.address.city") through nested
-    # structures. Split parts are cached per needle.
-    my $parts = $self->{_dive_parts_cache}{$needle}
-             // ($self->{_dive_parts_cache}{$needle} = [split /\./, $needle]);
-    my $arr   = $haystack;
+    # structures.
+    my $arr = $haystack;
 
     foreach my $elem (@$parts) {
         if (!defined $arr) { return undef }
@@ -441,6 +457,14 @@ sub _precompute_tags {
 
     # Precompiled expression catch-all regex
     $self->{_re_expr} = qr/^\Q$o\E(.+)\Q$c\E$/s;
+
+    # Precompiled comparison against a dotted path, e.g.
+    # $__S->{sluz_pfx_user}->{role} eq "admin"
+    my $pfx_qr = quotemeta($self->{var_prefix});
+    $self->{_re_cmp_dotted} = qr/^\$__S->\{${pfx_qr}_(\w+)\}->\{(\w+)\}\s*(==|!=|eq|ne|>=|<=|>|<)\s*(?:"([^"]*)"|'([^']*)'|(-?\d+(?:\.\d+)?))$/;
+
+    # Key prefix used to look a variable up in the __S hash
+    $self->{_prefix} = $self->{var_prefix} . '_';
 
     # Precompiled simple if regex (no else/elseif)
     $self->{_re_if_simple} = qr/\Q$o\Eif (.+?)\Q$c\E(.+)\Q$o\E\/if\Q$c\E/s;
@@ -878,12 +902,12 @@ sub _process_blocks {
                 if (ref $val eq 'ARRAY')   { $$out .= 'ARRAY' }
                 elsif (ref $val eq 'HASH') { $$out .= 'HASH' }
                 elsif (defined $val)       { $$out .= ($self->{auto_escape} ? escape($val) : $val) }
-            } elsif ($type == 3) {
-                $self->{char_pos} = $x->[1];
-                $$out .= $self->_if_block($x->[0]);
             } elsif ($type == 2) {
                 $self->{char_pos} = $x->[1];
                 $$out .= $self->_variable_block($x->[3]);
+            } elsif ($type == 3) {
+                $self->{char_pos} = $x->[1];
+                $$out .= $self->_if_block($x->[0]);
             } elsif ($type == 4) {
                 $self->{char_pos} = $x->[1];
                 $$out .= $self->_foreach_block($x->[3], $x->[4], $x->[5], $x->[6]);
@@ -913,12 +937,12 @@ sub _process_blocks {
             if (ref $val eq 'ARRAY')   { $html .= 'ARRAY' }
             elsif (ref $val eq 'HASH') { $html .= 'HASH' }
             elsif (defined $val)       { $html .= ($self->{auto_escape} ? escape($val) : $val) }
-        } elsif ($type == 3) {
-            $self->{char_pos} = $x->[1];
-            $html .= $self->_if_block($x->[0]);
         } elsif ($type == 2) {
             $self->{char_pos} = $x->[1];
             $html .= $self->_variable_block($x->[3]);
+        } elsif ($type == 3) {
+            $self->{char_pos} = $x->[1];
+            $html .= $self->_if_block($x->[0]);
         } elsif ($type == 4) {
             $self->{char_pos} = $x->[1];
             $html .= $self->_foreach_block($x->[3], $x->[4], $x->[5], $x->[6]);
@@ -1025,7 +1049,8 @@ sub _variable_block {
     if ($chain) {
         my $tmp = $chain->{has_dot} ? $self->array_dive($chain->{key}, $self->{tpl_vars})
                                     : $self->{tpl_vars}{$chain->{key}};
-        my $is_nothing = (!defined $tmp || (ref $tmp eq '' && !length $tmp && $tmp ne '0'));
+        # "nothing" is undef or an empty string
+        my $is_nothing = (!defined $tmp || (!ref($tmp) && $tmp eq ''));
 
         if ($chain->{is_default}) {
             my $pre;
@@ -1230,33 +1255,7 @@ sub _if_block {
 
     my $rules = $self->{_if_rules_cache}{$str};
     if (!$rules) {
-        my $od = $self->{open_delim};
-        my $cd = $self->{close_delim};
-
-        my $isimple_start = length($od) + 1;
-        my $else_check    = $od . 'else';
-        my $is_simple     = index($str, $else_check, $isimple_start) < 0;
-
-        my @rules;
-        if ($is_simple) {
-            $str =~ $self->{_re_if_simple};
-            my $cond    = $1 // '';
-            my $payload = $2 // '';
-            $payload    = $self->ltrim_one($payload, "\n");
-
-            @rules = ([$cond, $payload]);
-        } else {
-            my @toks = $self->get_tokens($str);
-            @rules   = $self->_if_rules_from_tokens(\@toks);
-        }
-
-        # Pre-resolve each condition's shape once so renders skip
-        # _convert_vars/_micro_optimize/_peval for simple conditions.
-        foreach my $rule (@rules) {
-            push @$rule, $self->_shape_of($rule->[0]);
-        }
-
-        $rules = \@rules;
+        $rules = $self->_build_if_rules($str);
         $self->{_if_rules_cache}{$str} = $rules;
     }
 
@@ -1268,22 +1267,66 @@ sub _if_block {
         my $kind  = $shape->[0];
         my $res;
 
-        if ($kind == 1) {
-            my ($neg, $key) = @{$shape->[1]};
-            if (exists $tv->{$key}) {
-                $res = $neg ? !$tv->{$key} : $tv->{$key};
+        if ($kind == 2) {
+            # Comparison against a literal: [2, $key, $opc, $right, $numeric]
+            my ($key, $opc, $right, $numeric) = @{$shape}[1, 2, 3, 4];
+            no warnings;
+            my $left = $tv->{$key};
+            if ($numeric) {
+                if    ($opc == 2) { $res = $left == $right }
+                elsif ($opc == 3) { $res = $left != $right }
+                elsif ($opc == 4) { $res = $left >  $right }
+                elsif ($opc == 5) { $res = $left <  $right }
+                elsif ($opc == 6) { $res = $left >= $right }
+                else              { $res = $left <= $right }
             } else {
-                my ($tmp, $err) = $self->_peval($shape->[1][2]);
+                if ($opc == 0) { $res = $left eq $right }
+                else           { $res = $left ne $right }
+            }
+        } elsif ($kind == 1) {
+            # Variable reference: [1, $neg, $key, $converted]
+            my ($neg, $key) = @{$shape}[1, 2];
+            my $v = $tv->{$key};
+            if (defined $v) {
+                $res = $neg ? !$v : $v;
+            } elsif (exists $tv->{$key}) {
+                $res = $neg ? 1 : undef;
+            } else {
+                my ($tmp, $err) = $self->_peval($shape->[3]);
                 if ($err) {
                     my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
                     $self->_error_out("Unable to evaluate condition <code>$rule->[0]</code> in <code>$file</code> on line #$line", 18933);
                 }
                 $res = $tmp;
             }
-        } elsif ($kind == 2) {
-            $res = $self->_micro_compare($shape->[1], $tv->{$shape->[1][1]});
         } elsif ($kind == 3) {
             $res = $shape->[1];
+        } elsif ($kind == 4) {
+            # Dotted comparison: [4, $root, $sub, $opc, $right, $numeric, $conv]
+            my ($root, $sub, $opc, $right, $numeric) = @{$shape}[1, 2, 3, 4, 5];
+            my $h = $self->{__S}{$self->{_prefix} . $root};
+            if (ref $h eq 'HASH') {
+                no warnings;
+                my $left = $h->{$sub};
+                if ($numeric) {
+                    if    ($opc == 2) { $res = $left == $right }
+                    elsif ($opc == 3) { $res = $left != $right }
+                    elsif ($opc == 4) { $res = $left >  $right }
+                    elsif ($opc == 5) { $res = $left <  $right }
+                    elsif ($opc == 6) { $res = $left >= $right }
+                    else              { $res = $left <= $right }
+                } else {
+                    if ($opc == 0) { $res = $left eq $right }
+                    else           { $res = $left ne $right }
+                }
+            } else {
+                my ($tmp, $err) = $self->_peval($shape->[6]);
+                if ($err) {
+                    my ($line, $col, $file) = $self->_get_char_location($self->{char_pos}, $self->{tpl_file});
+                    $self->_error_out("Unable to evaluate condition <code>$rule->[0]</code> in <code>$file</code> on line #$line", 18933);
+                }
+                $res = $tmp;
+            }
         } else {
             my ($tmp, $err) = $self->_peval($shape->[1]);
             if ($err) {
@@ -1294,14 +1337,19 @@ sub _if_block {
         }
 
         if ($res) {
-            my $payload = $rule->[1];
+            # The payload's blocks are tokenized once and remembered on
+            # the rule, so repeated renders skip the cache lookup.
+            my $in_blocks = $rule->[3];
+            if (!$in_blocks) {
+                my $payload = $rule->[1];
+                my $cached  = $self->{_blocks_cache}{$payload};
+                $in_blocks  = $cached ? $cached : [$self->_get_blocks($payload)];
+                $rule->[3]  = $in_blocks;
+            }
 
-            # Inline _get_blocks for cached payloads. Pass \$ret to
-            # _process_blocks so it appends directly — avoids a temp
-            # string allocation + concat per if-payload render.
-            my $cached    = $self->{_blocks_cache}{$payload};
-            my $in_blocks = $cached ? $cached : [$self->_get_blocks($payload)];
-
+            # Pass \$ret to _process_blocks so it appends directly —
+            # avoids a temp string allocation + concat per if-payload
+            # render.
             $self->_process_blocks($in_blocks, \$ret);
 
             last;
@@ -1311,20 +1359,162 @@ sub _if_block {
     return $ret;
 }
 
+# Parse an {if}/{elseif}/{else} block into a list of rules.  Each rule
+# is [condition, payload, shape] and the shape carries a pre-classified
+# form of the condition so that renders never have to re-parse it.
+sub _build_if_rules {
+    my $self = shift;
+    my $str  = shift;
+
+    my $od = $self->{open_delim};
+    my $cd = $self->{close_delim};
+
+    my $isimple_start = length($od) + 1;
+    my $else_check    = $od . 'else';
+    my $is_simple     = index($str, $else_check, $isimple_start) < 0;
+
+    my @rules;
+    if ($is_simple) {
+        $str =~ $self->{_re_if_simple};
+        my $cond    = $1 // '';
+        my $payload = $2 // '';
+        $payload    = $self->ltrim_one($payload, "\n");
+
+        @rules = ([$cond, $payload]);
+    } else {
+        my @toks = $self->get_tokens($str);
+        @rules   = $self->_if_rules_from_tokens(\@toks);
+    }
+
+    # Pre-resolve each condition's shape once so renders skip
+    # _convert_vars/_micro_optimize/_peval for simple conditions.
+    foreach my $rule (@rules) {
+        push @$rule, $self->_shape_of($rule->[0]);
+    }
+
+    return \@rules;
+}
+
 sub _foreach_block {
     my $self     = shift;
     my $src_expr = shift;
     my $okey     = shift;
     my $oval     = shift;
     my $payload  = shift;
+    my $plan     = shift;   # optional: an already built plan
 
-    $payload   = $self->ltrim_one($payload, "\n");
-    my $blocks = $self->_get_blocks_ref($payload);
+    # The plan caches everything about this loop that does not change
+    # between renders: the tokenized payload, the per-iteration
+    # bookkeeping flags, the save/restore key lists and a compiled
+    # renderer for the loop body.
+    if (!$plan) {
+        my $ckey = defined $oval ? $okey . "\x00" . $oval : $okey;
+        my $slot = $self->{_foreach_plans}{$ckey};
+        $plan = $slot ? $slot->{$payload} : undef;
+        $plan = $self->_foreach_plan($okey, $oval, $payload) if !$plan;
+    }
 
-    # Blocks arrive pre-classified from _get_blocks (cached), so no
-    # per-render classification work is needed here.
-    # type: -1=empty 0=text 1=simple_var 2=mod_var 3=if 4=foreach
-    #        5=include 6=literal 7=expr 9=unknown (_process_block fallback)
+    my $tv = $self->{tpl_vars};
+    my $ks = $self->{__S};
+
+    # Resolve the loop source via its cached shape — simple variable
+    # sources skip _convert_vars/_peval entirely on every render.
+    my $shape = $self->{_src_shape_cache}{$src_expr}
+             // ($self->{_src_shape_cache}{$src_expr} = $self->_shape_of($src_expr));
+    my $src;
+
+    my $skind = $shape->[0];
+    if ($skind == 1) {
+        # Plain variable reference
+        my ($neg, $key) = @{$shape}[1, 2];
+        my $v = $tv->{$key};
+        if (defined $v) {
+            $src = $neg ? !$v : $v;
+        } elsif (exists $tv->{$key}) {
+            $src = $neg ? 1 : undef;
+        } else {
+            ($src) = $self->_peval($shape->[3]);
+        }
+    } elsif ($skind == 3) {
+        $src = $shape->[1];
+    } else {
+        $src = $self->_eval_shape($shape);
+    }
+
+    if (!defined $src) {
+        $src = [];
+    } else {
+        my $r = ref $src;
+        if ($r ne 'ARRAY' && $r ne 'HASH') { $src = [$src] }
+    }
+
+    # Save only the keys we'll modify — O(k) where k <= 5, vs O(n) for
+    # copying the entire tpl_vars/__S hashes. Big win for nested foreach.
+    my $tpl_keys = $plan->{tpl_keys};
+    my $ks_keys  = $plan->{ks_keys};
+
+    my (@tpl_exists, @tpl_vals, @ks_exists, @ks_vals);
+
+    if (@$tpl_keys) {
+        foreach my $k (@$tpl_keys) {
+            push @tpl_exists, exists $tv->{$k};
+            push @tpl_vals,   $tv->{$k};
+        }
+    }
+
+    if (@$ks_keys) {
+        foreach my $k (@$ks_keys) {
+            push @ks_exists, exists $ks->{$k};
+            push @ks_vals,   $ks->{$k};
+        }
+    }
+
+    my $ret;
+    if ($plan->{sub}) {
+        $ret = $plan->{sub}->($self, $tv, $ks, $src, $plan);
+    } else {
+        $ret = $self->_foreach_render($plan, $src, $tv, $ks);
+    }
+
+    # Restore only the keys we modified
+    foreach my $i (0 .. $#$tpl_keys) {
+        if ($tpl_exists[$i]) {
+            $self->{tpl_vars}{$tpl_keys->[$i]} = $tpl_vals[$i];
+        } else {
+            delete $self->{tpl_vars}{$tpl_keys->[$i]};
+        }
+    }
+
+    if ($plan->{need_eval}) {
+        foreach my $i (0 .. $#$ks_keys) {
+            if ($ks_exists[$i]) {
+                $self->{__S}{$ks_keys->[$i]} = $ks_vals[$i];
+            } else {
+                delete $self->{__S}{$ks_keys->[$i]};
+            }
+        }
+    }
+
+    return $ret;
+}
+
+# Build (and cache) the plan for one {foreach} loop.  A plan holds the
+# tokenized payload, the flags that decide which loop variables have to
+# be published to tpl_vars/__S, the list of keys to save and restore
+# around the loop, and a compiled renderer for the loop body.
+sub _foreach_plan {
+    my $self = shift;
+    my $okey = shift;
+    my $oval = shift;
+    my $raw  = shift;
+
+    my $ckey = defined $oval ? $okey . "\x00" . $oval : $okey;
+    my $slot = $self->{_foreach_plans}{$ckey};
+    my $plan = $slot ? $slot->{$raw} : undef;
+    return $plan if $plan;
+
+    my $payload = $self->ltrim_one($raw, "\n");
+    my $blocks  = $self->_get_blocks_ref($payload);
 
     # Simple variable/text loops do not execute expressions, so __S does not
     # need to be updated for every item. This is especially useful for nested
@@ -1363,37 +1553,12 @@ sub _foreach_block {
         }
     }
 
-    # Resolve the loop source via its cached shape — simple variable
-    # sources skip _convert_vars/_peval entirely on every render.
-    my $shape = $self->{_src_shape_cache}{$src_expr}
-             // ($self->{_src_shape_cache}{$src_expr} = $self->_shape_of($src_expr));
-    my $src = $self->_eval_shape($shape);
-
-    if (!defined $src) {
-        $src = [];
-    } elsif (ref $src ne 'ARRAY' && ref $src ne 'HASH') {
-        $src = [$src];
-    }
-
     my $pfx = $self->{var_prefix};
-
-    # Precompute __S keys for the loop variables
-    my $okey_ks   = "${pfx}_$okey";
-    my $oval_ks   = defined $oval ? "${pfx}_$oval" : undef;
-    my $first_ks  = "${pfx}__FOREACH_FIRST";
-    my $last_ks   = "${pfx}__FOREACH_LAST";
-    my $index_ks  = "${pfx}__FOREACH_INDEX";
-
-    my $ret  = '';
-    my $idx  = 0;
 
     my $need_first = index($payload, '__FOREACH_FIRST') >= 0;
     my $need_last  = index($payload, '__FOREACH_LAST')  >= 0;
     my $need_index = index($payload, '__FOREACH_INDEX') >= 0;
 
-    # Save only the keys we'll modify — O(k) where k <= 5, vs O(n) for
-    # copying the entire tpl_vars/__S hashes. Big win for nested foreach.
-    # Keys whose per-iteration writes are skipped need no save/restore.
     my @tpl_keys;
     push @tpl_keys, $okey if !$skip_key_write;
     push @tpl_keys, $oval if defined $oval && !$skip_val_write;
@@ -1403,306 +1568,479 @@ sub _foreach_block {
 
     my @ks_keys;
     if ($need_eval) {
-        push @ks_keys, $okey_ks;
-        push @ks_keys, $oval_ks  if defined $oval;
-        push @ks_keys, $first_ks if $need_first;
-        push @ks_keys, $last_ks  if $need_last;
-        push @ks_keys, $index_ks if $need_index;
+        push @ks_keys, "${pfx}_$okey";
+        push @ks_keys, "${pfx}_$oval" if defined $oval;
+        push @ks_keys, "${pfx}__FOREACH_FIRST" if $need_first;
+        push @ks_keys, "${pfx}__FOREACH_LAST"  if $need_last;
+        push @ks_keys, "${pfx}__FOREACH_INDEX" if $need_index;
     }
 
-    my @tpl_exists = map { exists $self->{tpl_vars}{$_} } @tpl_keys;
-    my @tpl_vals   = map { $self->{tpl_vars}{$_} } @tpl_keys;
-    my @ks_exists  = map { exists $self->{__S}{$_} } @ks_keys;
-    my @ks_vals    = map { $self->{__S}{$_} } @ks_keys;
+    $plan = {
+        blocks     => $blocks,
+        okey       => $okey,
+        oval       => $oval,
+        need_eval  => $need_eval,
+        write_key  => (!$skip_key_write) ? 1 : 0,
+        write_val  => (defined $oval && !$skip_val_write) ? 1 : 0,
+        need_first => $need_first,
+        need_last  => $need_last,
+        need_index => $need_index,
+        okey_ks    => "${pfx}_$okey",
+        oval_ks    => defined $oval ? "${pfx}_$oval" : undef,
+        first_ks   => "${pfx}__FOREACH_FIRST",
+        last_ks    => "${pfx}__FOREACH_LAST",
+        index_ks   => "${pfx}__FOREACH_INDEX",
+        tpl_keys   => \@tpl_keys,
+        ks_keys    => \@ks_keys,
+        gen_seq    => 0,   # counter used to name temporaries in generated code
+        nested     => [],  # plans for nested loops found in the body
+    };
 
-    # Local refs to avoid repeated $self->{...} hash deref in hot loops
-    my $tv          = $self->{tpl_vars};
-    my $ks          = $self->{__S};
-    my $auto_escape = $self->{auto_escape};
+    # Compile a specialized renderer for the loop body.  Returns undef
+    # if the generated source fails to compile, in which case the
+    # interpreter in _foreach_render() is used instead.
+    $plan->{sub} = $self->_compile_foreach($plan);
 
-    if (ref $src eq 'ARRAY') {
-        my $last = $#$src;
-        if (defined $oval) {
-            foreach my $i (0 .. $last) {
-                if ($need_first) {
-                    my $v = ($idx == 0) ? 1 : 0;
-                    $tv->{__FOREACH_FIRST} = $v;
-                    $ks->{$first_ks}       = $v if $need_eval;
-                }
+    $self->{_foreach_plans}{$ckey}{$raw} = $plan;
+    return $plan;
+}
 
-                if ($need_last) {
-                    my $v = ($idx == $last) ? 1 : 0;
-                    $tv->{__FOREACH_LAST} = $v;
-                    $ks->{$last_ks}       = $v if $need_eval;
-                }
+# Quote a string so it can be embedded in generated Perl source.
+sub _perl_quote {
+    my $s = shift;
+    $s = '' if !defined $s;
+    $s =~ s/\\/\\\\/g;
+    $s =~ s/'/\\'/g;
+    return "'" . $s . "'";
+}
 
-                if ($need_index) {
-                    $tv->{__FOREACH_INDEX} = $idx;
-                    $ks->{$index_ks}       = $idx if $need_eval;
-                }
+# Compile the {foreach} body into a dedicated Perl sub.  The generated
+# code inlines literal text and plain variable references, and delegates
+# everything else (if/foreach/modifier/expression/include blocks) back to
+# the regular block handlers.  The result is a tight loop with no
+# per-iteration type dispatch, no repeated hash lookups and no string
+# comparisons on the block type.
+sub _compile_foreach {
+    my $self = shift;
+    my $plan = shift;
 
-                my $v_key = $i;
-                my $v_val = $src->[$i];
+    my $blocks = $plan->{blocks};
+    my $okey   = $plan->{okey};
+    my $oval   = $plan->{oval};
 
-                $tv->{$okey}    = $v_key if !$skip_key_write;
-                $tv->{$oval}    = $v_val if !$skip_val_write;
-                $ks->{$okey_ks} = $v_key if $need_eval;
-                $ks->{$oval_ks} = $v_val if $need_eval;
+    my $body = $self->_gen_body($plan, $blocks, 0);
 
-                # Inline block processing with pre-classified types — no
-                # substr/regex work per iteration. Simple vars naming a
-                # loop variable are served from $v_key/$v_val directly.
-                foreach my $b (@$blocks) {
-                    my $type = $b->[2];
-                    if ($type == 0) {
-                        $ret .= $b->[0];
-                    } elsif ($type == 1) {
-                        my $val;
-                        if ($b->[4]) {
-                            $val = $self->array_dive($b->[3], $tv);
-                        } elsif ($b->[3] eq $okey) {
-                            $val = $v_key;
-                        } elsif ($b->[3] eq $oval) {
-                            $val = $v_val;
-                        } else {
-                            $val = $tv->{$b->[3]};
-                        }
-                        if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
-                        elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                        elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
-                    } elsif ($type == 3) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_if_block($b->[0]);
-                    } elsif ($type == 4) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
-                    } elsif ($type == 2) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_variable_block($b->[3]);
-                    } elsif ($type == 6) {
-                        $ret .= $b->[3];
-                    } elsif ($type == 7) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_expression_block($b->[0], $b->[3]);
-                    } elsif ($type == 5) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_include_block($b->[0]);
-                    } elsif ($type != -1) {
-                        $ret .= $self->_process_block($b->[0], $b->[1]);
-                    }
-                }
-                $idx++;
-            }
-        } else {
-            foreach my $i (0 .. $last) {
-                if ($need_first) {
-                    my $v = ($idx == 0) ? 1 : 0;
-                    $tv->{__FOREACH_FIRST} = $v;
-                    $ks->{$first_ks}       = $v if $need_eval;
-                }
-                if ($need_last) {
-                    my $v = ($idx == $last) ? 1 : 0;
-                    $tv->{__FOREACH_LAST} = $v;
-                    $ks->{$last_ks}       = $v if $need_eval;
-                }
-                if ($need_index) {
-                    $tv->{__FOREACH_INDEX} = $idx;
-                    $ks->{$index_ks}       = $idx if $need_eval;
-                }
-                my $v_key = $src->[$i];
-                $tv->{$okey} = $v_key if !$skip_key_write;
-                $ks->{$okey_ks} = $v_key if $need_eval;
-                foreach my $b (@$blocks) {
-                    my $type = $b->[2];
-                    if ($type == 0) {
-                        $ret .= $b->[0];
-                    } elsif ($type == 1) {
-                        my $val;
-                        if ($b->[4]) {
-                            $val = $self->array_dive($b->[3], $tv);
-                        } elsif ($b->[3] eq $okey) {
-                            $val = $v_key;
-                        } else {
-                            $val = $tv->{$b->[3]};
-                        }
-                        if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
-                        elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                        elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
-                    } elsif ($type == 3) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_if_block($b->[0]);
-                    } elsif ($type == 4) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
-                    } elsif ($type == 2) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_variable_block($b->[3]);
-                    } elsif ($type == 6) {
-                        $ret .= $b->[3];
-                    } elsif ($type == 7) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_expression_block($b->[0], $b->[3]);
-                    } elsif ($type == 5) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_include_block($b->[0]);
-                    } elsif ($type != -1) {
-                        $ret .= $self->_process_block($b->[0], $b->[1]);
-                    }
-                }
-                $idx++;
-            }
-        }
-    } elsif (ref $src eq 'HASH') {
-        my @keys = sort keys %$src;
-        my $last = $#keys;
-        if (defined $oval) {
-            foreach my $i (0 .. $last) {
-                my $k = $keys[$i];
-                if ($need_first) {
-                    my $v = ($idx == 0) ? 1 : 0;
-                    $tv->{__FOREACH_FIRST} = $v;
-                    $ks->{$first_ks}       = $v if $need_eval;
-                }
-                if ($need_last) {
-                    my $v = ($idx == $last) ? 1 : 0;
-                    $tv->{__FOREACH_LAST} = $v;
-                    $ks->{$last_ks}       = $v if $need_eval;
-                }
-                if ($need_index) {
-                    $tv->{__FOREACH_INDEX} = $idx;
-                    $ks->{$index_ks}       = $idx if $need_eval;
-                }
-                my $v_key = $k;
-                my $v_val = $src->{$k};
-                $tv->{$okey} = $v_key if !$skip_key_write;
-                $tv->{$oval} = $v_val if !$skip_val_write;
-                $ks->{$okey_ks} = $v_key if $need_eval;
-                $ks->{$oval_ks} = $v_val if $need_eval;
-                foreach my $b (@$blocks) {
-                    my $type = $b->[2];
-                    if ($type == 0) {
-                        $ret .= $b->[0];
-                    } elsif ($type == 1) {
-                        my $val;
-                        if ($b->[4]) {
-                            $val = $self->array_dive($b->[3], $tv);
-                        } elsif ($b->[3] eq $okey) {
-                            $val = $v_key;
-                        } elsif ($b->[3] eq $oval) {
-                            $val = $v_val;
-                        } else {
-                            $val = $tv->{$b->[3]};
-                        }
-                        if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
-                        elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                        elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
-                    } elsif ($type == 3) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_if_block($b->[0]);
-                    } elsif ($type == 4) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
-                    } elsif ($type == 2) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_variable_block($b->[3]);
-                    } elsif ($type == 6) {
-                        $ret .= $b->[3];
-                    } elsif ($type == 7) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_expression_block($b->[0], $b->[3]);
-                    } elsif ($type == 5) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_include_block($b->[0]);
-                    } elsif ($type != -1) {
-                        $ret .= $self->_process_block($b->[0], $b->[1]);
-                    }
-                }
-                $idx++;
-            }
-        } else {
-            foreach my $i (0 .. $last) {
-                my $k = $keys[$i];
-                if ($need_first) {
-                    my $v = ($idx == 0) ? 1 : 0;
-                    $tv->{__FOREACH_FIRST} = $v;
-                    $ks->{$first_ks}       = $v if $need_eval;
-                }
-                if ($need_last) {
-                    my $v = ($idx == $last) ? 1 : 0;
-                    $tv->{__FOREACH_LAST} = $v;
-                    $ks->{$last_ks}       = $v if $need_eval;
-                }
-                if ($need_index) {
-                    $tv->{__FOREACH_INDEX} = $idx;
-                    $ks->{$index_ks}       = $idx if $need_eval;
-                }
-                my $v_key = $src->{$k};
-                $tv->{$okey} = $v_key if !$skip_key_write;
-                $ks->{$okey_ks} = $v_key if $need_eval;
-                foreach my $b (@$blocks) {
-                    my $type = $b->[2];
-                    if ($type == 0) {
-                        $ret .= $b->[0];
-                    } elsif ($type == 1) {
-                        my $val;
-                        if ($b->[4]) {
-                            $val = $self->array_dive($b->[3], $tv);
-                        } elsif ($b->[3] eq $okey) {
-                            $val = $v_key;
-                        } else {
-                            $val = $tv->{$b->[3]};
-                        }
-                        if (ref $val eq 'ARRAY')   { $ret .= 'ARRAY' }
-                        elsif (ref $val eq 'HASH') { $ret .= 'HASH' }
-                        elsif (defined $val)       { $ret .= ($auto_escape ? escape($val) : $val) }
-                    } elsif ($type == 3) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_if_block($b->[0]);
-                    } elsif ($type == 4) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
-                    } elsif ($type == 2) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_variable_block($b->[3]);
-                    } elsif ($type == 6) {
-                        $ret .= $b->[3];
-                    } elsif ($type == 7) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_expression_block($b->[0], $b->[3]);
-                    } elsif ($type == 5) {
-                        $self->{char_pos} = $b->[1];
-                        $ret .= $self->_include_block($b->[0]);
-                    } elsif ($type != -1) {
-                        $ret .= $self->_process_block($b->[0], $b->[1]);
-                    }
-                }
-                $idx++;
-            }
-        }
+    my $book = $self->_compile_foreach_bookkeeping($plan);
+
+    my $code = "sub {\n";
+    $code .= "no warnings 'numeric';\n";
+    $code .= "my (\$self, \$tv, \$ks, \$src, \$pl) = \@_;\n";
+    $code .= "my \$ret = '';\n";
+    $code .= "my \$ae = \$self->{auto_escape};\n";
+
+    # Hash source: iterate the sorted key list
+    $code .= "if (ref(\$src) eq 'HASH') {\n";
+    $code .= "my \@kk = sort keys %\$src;\n";
+    $code .= "my \$last = \$#kk;\n";
+    $code .= "for my \$i (0 .. \$last) {\n";
+    $code .= "my \$v_key = " . (defined $oval ? "\$kk[\$i]" : "\$src->{\$kk[\$i]}") . ";\n";
+    $code .= "my \$v_val = " . (defined $oval ? "\$src->{\$kk[\$i]}" : "undef") . ";\n";
+    $code .= $book;
+    $code .= $body;
+    $code .= "}\n";
+    $code .= "} else {\n";
+
+    # Array source
+    $code .= "my \$last = \$#\$src;\n";
+    $code .= "for my \$i (0 .. \$last) {\n";
+    $code .= "my \$v_key = " . (defined $oval ? "\$i" : "\$src->[\$i]") . ";\n";
+    $code .= "my \$v_val = " . (defined $oval ? "\$src->[\$i]" : "undef") . ";\n";
+    $code .= $book;
+    $code .= $body;
+    $code .= "}\n";
+    $code .= "}\n";
+
+    $code .= "return \$ret;\n";
+    $code .= "}\n";
+
+    my $sub;
+    {
+        # local $@ keeps a compilation failure from leaking into the
+        # caller's error handling.
+        local $@;
+        $sub = eval $code;
     }
 
-    # Restore only the keys we modified
-    foreach my $i (0 .. $#tpl_keys) {
-        if ($tpl_exists[$i]) {
-            $self->{tpl_vars}{$tpl_keys[$i]} = $tpl_vals[$i];
-        } else {
-            delete $self->{tpl_vars}{$tpl_keys[$i]};
-        }
-    }
+    return $sub;
+}
 
-    if ($need_eval) {
-        foreach my $i (0 .. $#ks_keys) {
-            if ($ks_exists[$i]) {
-                $self->{__S}{$ks_keys[$i]} = $ks_vals[$i];
+# Generate the Perl source for a list of template blocks.  Literal text
+# and plain variable references are inlined; everything else is delegated
+# to the regular block handlers.  {if} blocks whose conditions can be
+# evaluated without eval() are inlined as well, which removes a method
+# call, a rule lookup and a block dispatch from every iteration.
+sub _gen_body {
+    my ($self, $plan, $blocks, $depth) = @_;
+
+    my $okey = $plan->{okey};
+    my $oval = $plan->{oval};
+    my $code = '';
+
+    foreach my $b (@$blocks) {
+        my $t = $b->[2];
+
+        if ($t == 0) {
+            $code .= '$ret .= ' . _perl_quote($b->[0]) . ";\n";
+
+        } elsif ($t == 1) {
+            my $name = $b->[3];
+            my $expr;
+
+            if ($b->[4]) {
+                # Dotted path — resolved through array_dive()
+                $expr = '$self->array_dive(' . _perl_quote($name) . ', $tv)';
+            } elsif ($name eq $okey) {
+                $expr = '$v_key';
+            } elsif (defined $oval && $name eq $oval) {
+                $expr = '$v_val';
             } else {
-                delete $self->{__S}{$ks_keys[$i]};
+                $expr = '$tv->{' . _perl_quote($name) . '}';
+            }
+
+            $code .= sprintf($VAL_TMPL, $expr) . "\n";
+
+        } elsif ($t == 3) {
+            my $inline = $self->_gen_if_inline($plan, $b, $depth);
+            if (defined $inline) {
+                $code .= $inline;
+            } else {
+                $code .= '$self->{char_pos} = ' . $b->[1]
+                      . '; $ret .= $self->_if_block(' . _perl_quote($b->[0]) . ");\n";
+            }
+
+        } elsif ($t == 4) {
+            # A nested loop gets its own plan, built once and handed to
+            # the renderer directly so that no lookup is needed at
+            # render time.
+            my $nested = $self->_foreach_plan($b->[4], $b->[5], $b->[6]);
+            my $nidx   = scalar @{$plan->{nested}};
+            push @{$plan->{nested}}, $nested;
+
+            $code .= '$self->{char_pos} = ' . $b->[1]
+                  . '; $ret .= $self->_foreach_block('
+                  . CORE::join(', ', _perl_quote($b->[3]), _perl_quote($b->[4]),
+                               (defined $b->[5] ? _perl_quote($b->[5]) : 'undef'),
+                               _perl_quote($b->[6]), '$pl->{nested}[' . $nidx . ']')
+                  . ");\n";
+
+        } elsif ($t == 2) {
+            $code .= '$self->{char_pos} = ' . $b->[1]
+                  . '; $ret .= $self->_variable_block(' . _perl_quote($b->[3]) . ");\n";
+
+        } elsif ($t == 6) {
+            $code .= '$ret .= ' . _perl_quote($b->[3]) . ";\n";
+
+        } elsif ($t == 7) {
+            $code .= '$self->{char_pos} = ' . $b->[1]
+                  . '; $ret .= $self->_expression_block('
+                  . _perl_quote($b->[0]) . ', ' . _perl_quote($b->[3]) . ");\n";
+
+        } elsif ($t == 5) {
+            $code .= '$self->{char_pos} = ' . $b->[1]
+                  . '; $ret .= $self->_include_block(' . _perl_quote($b->[0]) . ");\n";
+
+        } elsif ($t != -1) {
+            $code .= '$ret .= $self->_process_block(' . _perl_quote($b->[0])
+                  . ', ' . $b->[1] . ");\n";
+        }
+    }
+
+    return $code;
+}
+
+# Try to build an inline {if} block.  Returns the generated source, or
+# undef when the block cannot be inlined (in which case the caller falls
+# back to the regular _if_block() handler).
+sub _gen_if_inline {
+    my ($self, $plan, $b, $depth) = @_;
+
+    my $str = $b->[0];
+
+    my $rules;
+    {
+        # A malformed block raises an error here; fall back to the
+        # regular handler so the error is reported at the usual time.
+        local $@;
+        $rules = eval { $self->_build_if_rules($str) };
+        return undef if !$rules || !@$rules;
+    }
+
+    my $multi = (@$rules > 1) ? 1 : 0;
+    my $flag  = '$m' . $plan->{gen_seq}++;
+    my @r;
+
+    foreach my $rule (@$rules) {
+        my $shape = $rule->[2];
+        my $kind  = $shape->[0];
+
+        my $cond;      # the condition to test
+        my $guard;     # undef when the fast path is always available
+        my $pre;       # statements evaluated before the condition
+        my $tmp = '$cv' . $plan->{gen_seq}++;
+
+        if ($kind == 2) {
+            # [2, $key, $opc, $right, $numeric] — compare against tpl_vars
+            my ($key, $opc, $right, $numeric) = @{$shape}[1, 2, 3, 4];
+            $cond = $self->_gen_cmp('$tv->{' . _perl_quote($key) . '}',
+                                    $opc, $right, $numeric);
+
+        } elsif ($kind == 3) {
+            # Constant condition
+            $cond = _perl_quote($shape->[1]);
+
+        } elsif ($kind == 1) {
+            # [1, $neg, $key, $converted] — a plain variable reference.
+            # The key must exist, otherwise the regular handler is used
+            # so that the eval() fallback keeps working.
+            my ($neg, $key) = @{$shape}[1, 2];
+            $pre   = "my $tmp = \$tv->{" . _perl_quote($key) . "};\n";
+            $guard = 'exists $tv->{' . _perl_quote($key) . '}';
+            $cond  = $neg ? "!$tmp" : $tmp;
+
+        } elsif ($kind == 4) {
+            # [4, $root, $sub, $opc, $right, $numeric, $converted] — a
+            # comparison against a dotted path held in the __S hash.
+            my ($root, $sub, $opc, $right, $numeric) = @{$shape}[1, 2, 3, 4, 5];
+            $pre   = "my $tmp = \$ks->{" . _perl_quote($self->{_prefix} . $root) . "};\n";
+            $guard = "ref $tmp eq 'HASH'";
+            $cond  = $self->_gen_cmp($tmp . '->{' . _perl_quote($sub) . '}',
+                                     $opc, $right, $numeric);
+
+        } else {
+            # Needs eval() — cannot be inlined.
+            return undef;
+        }
+
+        # The payload of the rule
+        my $payload = $rule->[1];
+        my $pblocks;
+        {
+            local $@;
+            $pblocks = eval { $self->_get_blocks_ref($payload) };
+            return undef if !$pblocks;
+        }
+
+        my $pcode = $self->_gen_body($plan, $pblocks, $depth + 1);
+
+        push @r, {
+            cond  => $cond,
+            guard => $guard,
+            pre   => $pre,
+            code  => $pcode,
+        };
+    }
+
+    # The regular handler takes over whenever the fast path for a rule
+    # is not available.  It re-evaluates the whole block, so it is only
+    # reached in situations that cannot be evaluated inline.
+    my $fb = '$self->{char_pos} = ' . $b->[1]
+           . '; $ret .= $self->_if_block(' . _perl_quote($str) . ');';
+
+    my $code = '';
+    $code .= "my $flag = 0;\n" if $multi;
+
+    foreach my $r (@r) {
+        my $set = $multi ? "$flag = 1; " : '';
+
+        if (defined $r->{guard}) {
+            $code .= $r->{pre};
+            $code .= 'if (' . $r->{guard} . ") {\n";
+            $code .= "if ($r->{cond}) { $set" . $r->{code} . "}\n";
+            $code .= "} else {\n";
+            $code .= $set . $fb . "\n";
+            $code .= "}\n";
+        } else {
+            my $guard = $multi ? "!" . $flag . " && " : '';
+            $code .= "if ($guard$r->{cond}) { $set" . $r->{code} . "}\n";
+        }
+    }
+
+    return $code;
+}
+
+# Build the Perl source for a comparison.
+sub _gen_cmp {
+    my ($self, $left, $opc, $right, $numeric) = @_;
+
+    if ($numeric) {
+        if    ($opc == 2) { return $left . ' == ' . $right }
+        elsif ($opc == 3) { return $left . ' != ' . $right }
+        elsif ($opc == 4) { return $left . ' > '  . $right }
+        elsif ($opc == 5) { return $left . ' < '  . $right }
+        elsif ($opc == 6) { return $left . ' >= ' . $right }
+        else              { return $left . ' <= ' . $right }
+    }
+
+    my $r = _perl_quote($right);
+    if ($opc == 0) { return $left . ' eq ' . $r }
+
+    return $left . ' ne ' . $r;
+}
+
+# Generate the per-iteration bookkeeping code for a compiled foreach:
+# the __FOREACH_* flags and the publication of the loop variables to
+# tpl_vars and __S.
+sub _compile_foreach_bookkeeping {
+    my $self = shift;
+    my $plan = shift;
+
+    my $code = '';
+
+    if ($plan->{need_first}) {
+        $code .= "my \$fv = (\$i == 0) ? 1 : 0;\n";
+        $code .= "\$tv->{'__FOREACH_FIRST'} = \$fv;\n";
+        $code .= "\$ks->{" . _perl_quote($plan->{first_ks}) . "} = \$fv;\n"
+              if $plan->{need_eval};
+    }
+
+    if ($plan->{need_last}) {
+        $code .= "my \$lv = (\$i == \$last) ? 1 : 0;\n";
+        $code .= "\$tv->{'__FOREACH_LAST'} = \$lv;\n";
+        $code .= "\$ks->{" . _perl_quote($plan->{last_ks}) . "} = \$lv;\n"
+              if $plan->{need_eval};
+    }
+
+    if ($plan->{need_index}) {
+        $code .= "\$tv->{'__FOREACH_INDEX'} = \$i;\n";
+        $code .= "\$ks->{" . _perl_quote($plan->{index_ks}) . "} = \$i;\n"
+              if $plan->{need_eval};
+    }
+
+    if ($plan->{write_key}) {
+        $code .= "\$tv->{" . _perl_quote($plan->{okey}) . "} = \$v_key;\n";
+    }
+
+    if ($plan->{write_val}) {
+        $code .= "\$tv->{" . _perl_quote($plan->{oval}) . "} = \$v_val;\n";
+    }
+
+    if ($plan->{need_eval}) {
+        $code .= "\$ks->{" . _perl_quote($plan->{okey_ks}) . "} = \$v_key;\n";
+        $code .= "\$ks->{" . _perl_quote($plan->{oval_ks}) . "} = \$v_val;\n"
+              if defined $plan->{oval_ks};
+    }
+
+    return $code;
+}
+
+# Interpreter fallback used when the compiled renderer could not be
+# built.  Semantically identical to the compiled path.
+sub _foreach_render {
+    my $self = shift;
+    my $plan = shift;
+    my $src  = shift;
+    my $tv   = shift;
+    my $ks   = shift;
+
+    my $blocks      = $plan->{blocks};
+    my $okey        = $plan->{okey};
+    my $oval        = $plan->{oval};
+    my $auto_escape = $self->{auto_escape};
+    my $ret         = '';
+
+    my @items;
+
+    if (ref $src eq 'HASH') {
+        my @keys = sort keys %$src;
+        for my $i (0 .. $#keys) {
+            my $k = $keys[$i];
+            push @items, [ (defined $oval ? $k : $src->{$k}),
+                           (defined $oval ? $src->{$k} : undef) ];
+        }
+    } else {
+        for my $i (0 .. $#$src) {
+            push @items, [ (defined $oval ? $i : $src->[$i]),
+                           (defined $oval ? $src->[$i] : undef) ];
+        }
+    }
+
+    my $last = $#items;
+
+    for my $i (0 .. $last) {
+        my ($v_key, $v_val) = @{$items[$i]};
+
+        if ($plan->{need_first}) {
+            my $v = ($i == 0) ? 1 : 0;
+            $tv->{__FOREACH_FIRST} = $v;
+            $ks->{$plan->{first_ks}} = $v if $plan->{need_eval};
+        }
+        if ($plan->{need_last}) {
+            my $v = ($i == $last) ? 1 : 0;
+            $tv->{__FOREACH_LAST} = $v;
+            $ks->{$plan->{last_ks}} = $v if $plan->{need_eval};
+        }
+        if ($plan->{need_index}) {
+            $tv->{__FOREACH_INDEX} = $i;
+            $ks->{$plan->{index_ks}} = $i if $plan->{need_eval};
+        }
+
+        $tv->{$okey} = $v_key if $plan->{write_key};
+        $tv->{$oval} = $v_val if $plan->{write_val};
+        $ks->{$plan->{okey_ks}} = $v_key if $plan->{need_eval};
+        $ks->{$plan->{oval_ks}} = $v_val if $plan->{need_eval} && defined $plan->{oval_ks};
+
+        foreach my $b (@$blocks) {
+            my $type = $b->[2];
+
+            if ($type == 0) {
+                $ret .= $b->[0];
+            } elsif ($type == 1) {
+                my $val;
+                if ($b->[4]) {
+                    $val = $self->array_dive($b->[3], $tv);
+                } elsif ($b->[3] eq $okey) {
+                    $val = $v_key;
+                } elsif (defined $oval && $b->[3] eq $oval) {
+                    $val = $v_val;
+                } else {
+                    $val = $tv->{$b->[3]};
+                }
+
+                my $r = ref $val;
+                if ($r eq '') {
+                    $ret .= ($auto_escape ? escape($val) : $val) if defined $val;
+                } elsif ($r eq 'ARRAY') {
+                    $ret .= 'ARRAY';
+                } elsif ($r eq 'HASH') {
+                    $ret .= 'HASH';
+                } else {
+                    $ret .= $val;
+                }
+            } elsif ($type == 3) {
+                $self->{char_pos} = $b->[1];
+                $ret .= $self->_if_block($b->[0]);
+            } elsif ($type == 4) {
+                $self->{char_pos} = $b->[1];
+                $ret .= $self->_foreach_block($b->[3], $b->[4], $b->[5], $b->[6]);
+            } elsif ($type == 2) {
+                $self->{char_pos} = $b->[1];
+                $ret .= $self->_variable_block($b->[3]);
+            } elsif ($type == 6) {
+                $ret .= $b->[3];
+            } elsif ($type == 7) {
+                $self->{char_pos} = $b->[1];
+                $ret .= $self->_expression_block($b->[0], $b->[3]);
+            } elsif ($type == 5) {
+                $self->{char_pos} = $b->[1];
+                $ret .= $self->_include_block($b->[0]);
+            } elsif ($type != -1) {
+                $ret .= $self->_process_block($b->[0], $b->[1]);
             }
         }
     }
 
     return $ret;
 }
-
 sub _include_block {
     my $self = shift;
     my $str  = shift;
@@ -1940,8 +2278,8 @@ sub _micro_compare {
 # Classify a raw expression into a cached shape tuple so hot paths can
 # resolve it without calling _peval. Classification is pure (regex +
 # tpl_vars lookups only), so it is safe to run at cache-build time.
-# Returns: [3, literal] | [1, [neg, key, converted]] | [2, cmp_entry]
-#          [0, converted]
+# Returns: [3, literal] | [1, $neg, $key, converted] | [2, $key, $opc, $right, $numeric]
+#          [4, $root, $sub, $opc, $right, $numeric, converted] | [0, converted]
 # The var shape keeps the converted string because a missing key must
 # fall back to _peval (e.g. !$missing_var is true via eval, not undef).
 sub _shape_of {
@@ -1950,14 +2288,29 @@ sub _shape_of {
 
     my $conv = (index($raw, '$') < 0) ? $raw : $self->_convert_vars($raw);
 
+    # A comparison against a dotted path ($x.key eq "value") is common
+    # inside loops.  Recognise it here so the condition can be evaluated
+    # with a plain hash lookup instead of a compiled eval sub.
+    if ($conv =~ $self->{_re_cmp_dotted}) {
+        my ($root, $sub, $op, $dquote, $squote, $number) = ($1, $2, $3, $4, $5, $6);
+        my $literal = defined $number ? $number
+            : (defined $dquote ? $dquote : $squote);
+        my $numeric = ($op ne 'eq' && $op ne 'ne');
+
+        return [4, $root, $sub, $OP_CODE{$op}, $literal, $numeric, $conv];
+    }
+
     $self->_micro_optimize($conv); # populate _micro_cache with the shape
     my $e = $self->{_micro_cache}{$conv};
     if ($e) {
         my $t = $e->[0];
 
-        if ($t eq 'lit') { return [3, $e->[1]]                   }
-        if ($t eq 'var') { return [1, [$e->[1], $e->[2], $conv]] }
-        if ($t eq 'cmp') { return [2, $e]                        }
+        if ($t eq 'lit') { return [3, $e->[1]]                                }
+        if ($t eq 'var') { return [1, $e->[1], $e->[2], $conv]               }
+        if ($t eq 'cmp') {
+            my ($key, $op, $literal, $numeric) = @{$e}[1, 2, 3, 4];
+            return [2, $key, $OP_CODE{$op}, $literal, $numeric];
+        }
     }
 
     return [0, $conv];
@@ -1972,26 +2325,61 @@ sub _eval_shape {
 
     my $kind = $shape->[0];
     if ($kind == 1) {
-        my ($neg, $key) = @{$shape->[1]};
-        if (exists $tv->{$key}) {
-            my $v = $neg ? !$tv->{$key} : $tv->{$key};
-            if (defined $v) { return $v }
+        my ($neg, $key) = @{$shape}[1, 2];
+        my $v = $tv->{$key};
+        if (defined $v) {
+            return $neg ? !$v : $v;
         }
-        my ($ret) = $self->_peval($shape->[1][2]);
+        if (exists $tv->{$key}) {
+            return $neg ? 1 : undef;
+        }
+        my ($ret) = $self->_peval($shape->[3]);
         return $ret;
     }
 
     if ($kind == 2) {
-        return $self->_micro_compare($shape->[1], $tv->{$shape->[1][1]});
+        my ($key, $opc, $right, $numeric) = @{$shape}[1, 2, 3, 4];
+        return $self->_cmp_apply($opc, $tv->{$key}, $right, $numeric);
     }
 
     if ($kind == 3) {
         return $shape->[1];
     }
 
+    if ($kind == 4) {
+        my ($root, $sub, $opc, $right, $numeric) = @{$shape}[1, 2, 3, 4, 5];
+        my $h = $self->{__S}{$self->{_prefix} . $root};
+        if (ref $h eq 'HASH') {
+            return $self->_cmp_apply($opc, $h->{$sub}, $right, $numeric);
+        }
+        my ($ret) = $self->_peval($shape->[6]);
+        return $ret;
+    }
+
     my ($ret) = $self->_peval($shape->[1]);
 
     return $ret;
+}
+
+# Apply a comparison operator.  The operator is passed as a small
+# integer code so the hot paths avoid repeated string comparisons.
+sub _cmp_apply {
+    my ($self, $opc, $left, $right, $numeric) = @_;
+
+    no warnings;
+
+    if ($numeric) {
+        if    ($opc == 2) { return $left == $right }
+        elsif ($opc == 3) { return $left != $right }
+        elsif ($opc == 4) { return $left >  $right }
+        elsif ($opc == 5) { return $left <  $right }
+        elsif ($opc == 6) { return $left >= $right }
+        else              { return $left <= $right }
+    }
+
+    if ($opc == 0) { return $left eq $right }
+
+    return $left ne $right;
 }
 
 sub _peval {

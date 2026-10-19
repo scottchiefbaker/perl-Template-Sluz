@@ -3,6 +3,11 @@ use strict;
 use warnings;
 use 5.016;
 
+# Always benchmark the working copy, not a stale installed copy that may
+# be shadowing it in @INC.
+use FindBin;
+use lib "$FindBin::Bin/lib";
+
 use Template::Sluz;
 use Time::HiRes;
 use Getopt::Long qw(GetOptions);
