@@ -73,4 +73,15 @@ sluz_test($sluz, '{if $x == $x}YES{/if}'                    , 'YES'  , 'If #53 -
 sluz_test($sluz, '{if $bogus_var}{elseif $cust.first}X{/if}', 'X'    , 'If #54 - Elseif with dotted variable');
 sluz_test($sluz, '{if $bogus}{elseif $subarr.one.0}Y{/if}'  , 'Y'    , 'If #55 - Elseif with multi-level dotted variable');
 
+# Inline {if} blocks: the newline that ends their line is content and
+# must survive. Block-style blocks swallow it (their content already
+# ends with a newline of its own).
+sluz_test($sluz, "Two  : {if \$debug}YES - {\$key}{\/if}\nThree: end\n", "Two  : YES - val\nThree: end\n", 'If #56 - Inline if keeps the trailing newline');
+sluz_test($sluz, "Two  : {if \$zero}YES{else}NO{\/if}\nThree: end\n"   , "Two  : NO\nThree: end\n"       , 'If #57 - Inline if/else keeps the trailing newline');
+sluz_test($sluz, "A{if \$debug}B{if \$debug}C{\/if}D{\/if}E\n"         , "ABCDE\n"                       , 'If #58 - Nested inline if keeps the trailing newline');
+sluz_test($sluz, "{if \$debug}\nYES\n{\/if}\nThree: end\n"             , "YES\nThree: end\n"             , 'If #59 - Block style if swallows the trailing newline');
+sluz_test($sluz, "{if \$zero}\nYES\n{else}\nNO\n{\/if}\nThree: end\n"  , "NO\nThree: end\n"              , 'If #60 - Block style if/else swallows the trailing newline');
+sluz_test($sluz, "{if \$debug}{\/if}\nThree: end\n"                    , "Three: end\n"                  , 'If #61 - Empty if payload swallows the trailing newline');
+sluz_test($sluz, "Two  : {if \$debug}YES{\/if}"                        , "Two  : YES"                    , 'If #62 - Inline if at end of template');
+
 done_testing();
