@@ -26,7 +26,7 @@ use Exporter qw(import);
 use constant SLUZ_INLINE => 'INLINE_TEMPLATE';
 our @EXPORT = qw(SLUZ_INLINE);
 
-our $VERSION = 'v0.9.7';
+our $VERSION = 'v0.9.8';
 
 # Template used to emit a single variable value into a compiled foreach
 # body.  It mirrors the interpreter's output rules exactly:
